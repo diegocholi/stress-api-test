@@ -2,7 +2,10 @@ const path = require('path')
 const async = require('async')
 const newman = require('newman')
 
-const PARALLEL_RUN_COUNT = 1000
+const PARALLEL_RUN_COUNT = 300
+
+let successfullyCount = 0
+let failuresCount = 0
 
 const parametersForTestRun = {
   collection: path.join(__dirname, 'postman/postman_collection.json'), // your collection
@@ -25,10 +28,9 @@ async.parallel(commands, (err, results) => {
 
   results.forEach(function (result) {
     var failures = result.run.failures
-    console.info(
-      failures.length
-        ? JSON.stringify(failures.failures, null, 2)
-        : `${result.collection.name} ran successfully.`
-    )
+    if (failures.length) failuresCount++
+    else successfullyCount++
   })
+
+  console.info(`Sucesso: ${successfullyCount} | Falhas: ${failuresCount}`)
 })
