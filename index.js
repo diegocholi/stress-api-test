@@ -2,7 +2,7 @@ const path = require('path')
 const async = require('async')
 const newman = require('newman')
 
-const PARALLEL_RUN_COUNT = 2800
+const PARALLEL_RUN_COUNT = 400
 
 let successfullyCount = 0
 let failuresCount = 0
@@ -32,5 +32,6 @@ async.parallel(commands, (err, results) => {
     else successfullyCount++
   })
 
+  console.info(`Número de requisições feitas: ${PARALLEL_RUN_COUNT}`)
   console.info(`Sucessos: ${successfullyCount} | Falhas: ${failuresCount}`)
 })
