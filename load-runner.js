@@ -282,6 +282,9 @@ async function runOnce(iter) {
 
         const t0 = Date.now();
 
+        // (Opcional) medir latência por request quando o evento 'response' existir
+        const reqStart = new Map(); // key -> timestamp
+
         const r = newman.run(params, (err, summary) => {
             metrics.runs += 1;
 
@@ -290,28 +293,51 @@ async function runOnce(iter) {
                 if (!quiet) parentPort.postMessage({ type: 'log', message: `Run error: ${err.message}` });
             }
 
-            if (summary?.run?.failures?.length) {
-                metrics.errors += summary.run.failures.length;
-                if (!quiet) {
-                    summary.run.failures.slice(0, 3).forEach((f, i) => {
-                        const where = `${f.source?.name || 'item'} > ${f.error?.name || 'error'}`;
-                        parentPort.postMessage({
-                            type: 'log',
-                            message: `Failure #${i + 1}: ${where} :: ${f.error?.message || f.error}`
-                        });
+            // ✅ Coleta via executions (cobre pm.sendRequest e casos em que eventos não disparam)
+            try {
+                const executions = summary?.run?.executions || [];
+                for (const ex of executions) {
+                    const res = ex?.response;
+                    if (!res) continue;
+                    const code = res.code ? String(res.code) : '0';
+                    const rt = typeof res.responseTime === 'number' ? res.responseTime : NaN;
+
+                    metrics.reqs += 1;
+                    if (Number.isFinite(rt)) pushLatency(rt);
+                    metrics.httpCodes[code] = (metrics.httpCodes[code] || 0) + 1;
+
+                    sampleBuffer.push({
+                        ts: Date.now(),
+                        vu: id,
+                        iter,
+                        code,
+                        rt: Number.isFinite(rt) ? rt : ''
                     });
+
+                    if (sampleBuffer.length >= SAMPLE_FLUSH_EVERY) {
+                        const rows = sampleBuffer;
+                        sampleBuffer = [];
+                        parentPort.postMessage({ type: 'samples', rows });
+                        if (!quiet) parentPort.postMessage({ type: 'log', message: `[samples] enviado lote (executions) com ${rows.length} linhas` });
+                    }
                 }
+            } catch (e2) {
+                if (!quiet) parentPort.postMessage({ type: 'log', message: `executions parse error: ${e2.message}` });
             }
 
+            // Latência do "run" (não substitui a por-request)
             pushLatency(Date.now() - t0);
+
             resolve();
         });
 
-        r.on('request', (err) => {
-            if (err) {
-                metrics.errors += 1;
-                if (!quiet) parentPort.postMessage({ type: 'log', message: `Request error: ${err.message}` });
-            }
+        // Eventos — úteis quando existem itens "normais" na collection
+        r.on('beforeRequest', (_err, args) => {
+            // Tenta construir uma chave estável por request
+            const key = (args?.cursor?.httpRequestId) || `${args?.item?.id || ''}-${Date.now()}-${Math.random()}`;
+            reqStart.set(key, Date.now());
+            // Guarda a key dentro do args para usar na resposta
+            args.__key = key;
         });
 
         r.on('response', (err, args) => {
@@ -320,25 +346,48 @@ async function runOnce(iter) {
                 if (!quiet) parentPort.postMessage({ type: 'log', message: `Response error: ${err.message}` });
                 return;
             }
+
             metrics.reqs += 1;
+
             try {
                 const res = args.response;
                 const code = res?.code ? String(res.code) : '0';
-                const rt = typeof res?.responseTime === 'number' ? res.responseTime : NaN;
+                let rt = typeof res?.responseTime === 'number' ? res.responseTime : NaN;
+
+                // Se o runtime não deu responseTime, tenta calcular com beforeRequest
+                const key = args.__key || args?.cursor?.httpRequestId;
+                if (!Number.isFinite(rt) && key && reqStart.has(key)) {
+                    rt = Date.now() - (reqStart.get(key) || Date.now());
+                    reqStart.delete(key);
+                }
+
                 if (Number.isFinite(rt)) pushLatency(rt);
                 metrics.httpCodes[code] = (metrics.httpCodes[code] || 0) + 1;
 
-                // CSV sample (enviar em lotes)
-                sampleBuffer.push({ ts: Date.now(), vu: id, iter, code, rt: Number.isFinite(rt) ? rt : '' });
+                sampleBuffer.push({
+                    ts: Date.now(),
+                    vu: id,
+                    iter,
+                    code,
+                    rt: Number.isFinite(rt) ? rt : ''
+                });
+
                 if (sampleBuffer.length >= SAMPLE_FLUSH_EVERY) {
                     const rows = sampleBuffer;
                     sampleBuffer = [];
                     parentPort.postMessage({ type: 'samples', rows });
-                    if (!quiet) parentPort.postMessage({ type: 'log', message: `[samples] enviado lote com ${rows.length} linhas` });
+                    if (!quiet) parentPort.postMessage({ type: 'log', message: `[samples] enviado lote (events) com ${rows.length} linhas` });
                 }
             } catch (e) {
                 metrics.errors += 1;
                 if (!quiet) parentPort.postMessage({ type: 'log', message: `Response parse error: ${e.message}` });
+            }
+        });
+
+        r.on('request', (err) => {
+            if (err) {
+                metrics.errors += 1;
+                if (!quiet) parentPort.postMessage({ type: 'log', message: `Request error: ${err.message}` });
             }
         });
 
