@@ -1,77 +1,90 @@
-# stress-api-test
+Pré-reqs: Node 18+, `npm i newman` (sem `async`, usamos Promises nativas).
 
-Teste de stress em APIs a partir de arquivos postman.json
+Coloque sua collection em `postman/*.postman_collection.json` e (opcional) um environment.
 
-## Criação do projeto:
+## Como usar
 
-Basta executar `npm init -y` e instalar as 3 dependências:
+- **Rampa de carga (stages)**: `"duracaoSeg:concorrencia"`, separados por vírgula.
 
-```
-npm i async newman path
-```
+  > stage: 30:200 → Durante 30 segundos, manter 200 usuários ativos em paralelo rodando sua collection Postman.
 
-```
-{
- "name": "newman_parallel",
- "version": "1.0.0",
- "description": "",
- "main": "index.js",
- "scripts": {
-   "start": "node index.js"
- },
- "keywords": [],
- "author": "",
- "license": "ISC",
- "dependencies": {
-   "async": "^3.1.0",
-   "newman": "^4.5.6",
-   "path": "^0.12.7"
- }
-}
+- **Exemplos:**
+
+```bash
+node load-runner.js \
+  --collection=postman/autenticador.postman_collection.json \
+  --environment=postman/localhost.postman_environment.json \ # [Opcional]
+  --stages="30:200,60:2000,120:10000,120:20000" \
+  --iters=3 \
+  --timeout=60000 \
+  --keepAlive=true \
+  --insecure=false \
+  --bail=false \
+  --maxWorkers=64 \
+  --quiet=true \
+  --envVar="UA=<UA_DO_BROWSER>,COOKIE=<COOKIE_COPIADO>" \ # [Opcional]
+  --csv=out.csv  # [Opcional]
 ```
 
-Atualize o caminho para sua coleção e ambiente, especifique o número de execução simultânea que você deseja iniciar com a constante `PARALLEL_RUN_COUNT` e execute o script com `npm start`
+> Dica: rode **vários processos** (ou containers) desse runner em máquinas diferentes para atingir 30k+ concorrentes. Use um **balanceador**/coletor (ex.: Prometheus + Pushgateway ou logs centralizados) se quiser métricas unificadas.
 
-```
-const path = require('path')
-const async = require('async')
-const newman = require('newman')
+---
 
-const PARALLEL_RUN_COUNT = 2
+## Boas práticas para chegar em 20–30k simultâneos
 
-const parametersForTestRun = {
-   collection: path.join(__dirname, 'postman/postman_collection.json'), // your collection
-   environment: path.join(__dirname, 'postman/localhost.postman_environment.json'), //your env
-   reporters: 'cli'
-};
+1. **Open vs. Closed Model**
 
-parallelCollectionRun = function (done) {
-   newman.run(parametersForTestRun, done);
-};
+   - _Open (arrivals controlados por RPS)_ é melhor para saturar o sistema. Este runner simula “closed” por VUs. Para _open_, adapte para criar novos VUs continuamente por taxa pretendida (RPS).
 
-let commands = []
-for (let index = 0; index < PARALLEL_RUN_COUNT; index++) {
-   commands.push(parallelCollectionRun);
-}
+2. **Ramp-up gradual**
 
-// Runs the Postman sample collection thrice, in parallel.
-async.parallel(
-   commands,
-   (err, results) => {
-       err && console.error(err);
+   - Evita “thundering herd”. Aumente em degraus (ex. 2k → 5k → 10k → 20k).
 
-       results.forEach(function (result) {
-           var failures = result.run.failures;
-           console.info(failures.length ? JSON.stringify(failures.failures, null, 2) :
-               `${result.collection.name} ran successfully.`);
-       });
-   });
-```
+3. **Keep-Alive + Reuso de conexões**
 
-### Definir quantidade de memória para o processo:
+   - Reduz custo por request. (Ativado no script com `--keepAlive=true` por padrão).
 
-```
-node --max-old-space-size=4096 yourFile.js
-```
+4. **Reduza I/O**
 
-HELP: https://docs.google.com/document/d/11W2tqpMXhqYtd0zzGY-nPqCy0n8S9uTypY9AnLNT5AU/edit#
+   - Use `--quiet=true` e evite reporters verbosos. Stdout é gargalo.
+
+5. **Dados dinâmicos**
+
+   - Variáveis por VU/iteração (`UNIQUE_EMAIL`, `UNIQUE_ID`) para evitar cache/duplicidade do backend.
+
+6. **Timeouts realistas**
+
+   - `--timeout` coerente com seus SLOs. Conte timeouts como erros.
+
+7. **Ambiente e variações**
+
+   - Tenha environment Postman por ambiente (dev/stage/prod). Parametrize baseURL, tokens, etc.
+
+8. **Correlação**
+
+   - Se a collection obtém token e usa depois, mantenha as requisições na mesma execução Newman (este script faz isso). Se precisar _data feeders_ maiores, troque `iterationData` por CSV/JSON girando por VU.
+
+9. **Escala horizontal**
+
+   - Para 30k VUs, distribua: múltiplas VMs/containers + orquestração simples (makefile/bash) já resolve.
+
+10. **Observabilidade**
+
+- Colete logs/metrics do **SUT** (sistema sob teste) também: CPU, memória, fila, DB, cache, erro por rota. Os dois lados contam a história.
+
+---
+
+## Quando migrar para ferramentas de carga dedicadas
+
+Se o objetivo é **controle fino de RPS**, cenários complexos, e **distribuição nativa**:
+
+- **k6** (scripts em JS, fácil “stages” e thresholds; há conversores de collection Postman).
+- **Artillery** (YAML/JS, ótimo para cenários HTTP/WebSocket; tem plugin para Postman).
+- **JMeter/Gatling** (maduros, distribuídos).
+
+Você pode manter sua collection como **fonte de verdade** e:
+
+- Converter para k6 (há conversores de Postman → k6).
+- Ou usar Artillery importando a collection.
+
+Se quiser, te mando um exemplo já convertido para **k6** com ramp-up para **20k** e thresholds de SLO, mantendo a mesma lógica da sua collection.
