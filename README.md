@@ -86,5 +86,3 @@ Você pode manter sua collection como **fonte de verdade** e:
 
 - Converter para k6 (há conversores de Postman → k6).
 - Ou usar Artillery importando a collection.
-
-Se quiser, te mando um exemplo já convertido para **k6** com ramp-up para **20k** e thresholds de SLO, mantendo a mesma lógica da sua collection.
