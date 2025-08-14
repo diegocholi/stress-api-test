@@ -106,3 +106,5 @@ dist
 postman/*
 
 *.csv
+
+.DS_Store
