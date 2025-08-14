@@ -1,11 +1,8 @@
 /* eslint-disable no-console */
 const path = require('path');
 const os = require('os');
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const fs = require('fs');
-
-const SAMPLE_FLUSH_EVERY = 100; // envie a cada 100 respostas
-let sampleBuffer = []; // {ts, vu, iter, code, rt}
+const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 
 const MAX_SAMPLES = 200_000;
 function pushSamplesSafe(dstArray, srcArray) {
@@ -13,7 +10,7 @@ function pushSamplesSafe(dstArray, srcArray) {
         if (dstArray.length < MAX_SAMPLES) {
             dstArray.push(v);
         } else {
-            // reservoir sampling: substitui elementos aleatórios
+            // reservoir sampling
             const j = Math.floor(Math.random() * (dstArray.length + 1));
             if (j < dstArray.length) dstArray[j] = v;
         }
@@ -33,29 +30,32 @@ if (isMainThread) {
 
     const COLLECTION = args.collection || path.join(__dirname, 'postman/autenticador.postman_collection.json');
     const ENVIRONMENT = args.environment || null; // ex: 'postman/localhost.postman_environment.json'
-    const STAGES = (args.stages || '60:100,120:1000,120:5000,120:10000') // "duracaoSeg:alvoConc"
+    const STAGES = (args.stages || '60:100,120:1000,120:5000,120:10000')
         .split(',')
         .map(s => {
             const [dur, tgt] = s.split(':').map(Number);
             return { durationSec: dur, target: tgt };
         });
-    const MAX_WORKERS = Number(args.maxWorkers || Math.max(2, os.cpus().length)); // por processo
-    const ITERATIONS_PER_VU = Number(args.iters || 1); // quantas execs por "VU"
-    const TIMEOUT_MS = Number(args.timeout || 60000); // timeout por request
-    const KEEP_ALIVE = args.keepAlive !== 'false'; // keep-alive por default
-    const INSECURE = args.insecure === 'true'; // permitir TLS self-signed
-    const BAIL = args.bail === 'true'; // parar VU ao primeiro erro
-    const QUIET = args.quiet !== 'false'; // menos logs por padrão
+    const MAX_WORKERS = Number(args.maxWorkers || Math.max(2, os.cpus().length));
+    const ITERATIONS_PER_VU = Number(args.iters || 1);
+    const TIMEOUT_MS = Number(args.timeout || 60000);
+    const KEEP_ALIVE = args.keepAlive !== 'false'; // (ainda não usado pelo newman diretamente)
+    const INSECURE = args.insecure === 'true';
+    const BAIL = args.bail === 'true';
+    const QUIET = args.quiet !== 'false';
+
+    // ---- CSV ----
     const CSV_PATH = args.csv || null; // ex.: --csv=out.csv
     let csvStream = null;
     if (CSV_PATH) {
         csvStream = fs.createWriteStream(CSV_PATH, { flags: 'w' });
         csvStream.write('ts,vu,iter,code,latency_ms\n');
+        csvStream.on('error', (e) => console.error('[CSV ERROR]', e.message));
     }
 
     // ---- Estado/telemetria ----
     let active = 0;
-    let vuCounter = 0; // id sequencial de "VU"
+    let vuCounter = 0;
     let stop = false;
 
     const agg = {
@@ -64,7 +64,7 @@ if (isMainThread) {
         reqs: 0,
         errors: 0,
         httpCodes: new Map(),
-        latencies: [], // guardamos amostras compactadas (pode alternar para histograma se crescer muito)
+        latencies: [],
     };
 
     function pxx(arr, p) {
@@ -120,22 +120,17 @@ if (isMainThread) {
                 agg.runs += msg.runs;
                 agg.reqs += msg.reqs;
                 agg.errors += msg.errors;
-                // limitar amostras para não explodir memoria (ex.: até 1e6 amostras)
-                if (agg.latencies.length < 1_000_000) {
-                    pushSamplesSafe(agg.latencies, msg.latencies || []);
-                }
+                pushSamplesSafe(agg.latencies, msg.latencies || []); // sempre usa reservatório
                 if (msg.httpCodes) {
                     for (const [code, count] of Object.entries(msg.httpCodes)) {
                         agg.httpCodes.set(code, (agg.httpCodes.get(code) || 0) + count);
                     }
                 }
-            }
-            else if (msg.type === 'samples' && csvStream && Array.isArray(msg.rows)) {
-                // rows: [{ts, vu, iter, code, rt}]
+            } else if (msg.type === 'samples' && csvStream && Array.isArray(msg.rows)) {
                 const lines = msg.rows.map(r => `${r.ts},${r.vu},${r.iter},${r.code},${r.rt}\n`).join('');
                 csvStream.write(lines);
-            }
-            else if (msg.type === 'log' && !QUIET) {
+                if (!QUIET) console.log(`[CSV] +${msg.rows.length} linhas`);
+            } else if (msg.type === 'log' && !QUIET) {
                 console.log(`[VU ${id}] ${msg.message}`);
             }
         });
@@ -145,7 +140,7 @@ if (isMainThread) {
             workers.delete(worker);
             if (!stop && code !== 0) {
                 console.warn(`[WARN] VU ${id} saiu com código ${code}. Respawn automático.`);
-                spawnVU(); // respawn para manter o alvo de concorrência
+                spawnVU();
             }
         };
 
@@ -157,15 +152,12 @@ if (isMainThread) {
     }
 
     async function scaleTo(target) {
-        // escala por "bloquinhos" respeitando MAX_WORKERS por processo
         const diff = target - active;
         if (diff > 0) {
             const toStart = Math.min(diff, MAX_WORKERS);
             for (let i = 0; i < toStart; i++) spawnVU();
-            // se ainda faltar, tentamos completar após tick
             if (target - active > 0) setImmediate(() => scaleTo(target));
         } else if (diff < 0) {
-            // sinalizamos alguns para encerrar após iteração atual
             let toStop = -diff;
             for (const w of workers) {
                 if (toStop-- <= 0) break;
@@ -228,6 +220,7 @@ if (isMainThread) {
             console.error('[FATAL]', e);
             summarizeAndExit(1);
         });
+
     return;
 }
 
@@ -241,6 +234,8 @@ const {
     iterations, timeout, keepAlive, insecure, bail, quiet
 } = workerData;
 
+const SAMPLE_FLUSH_EVERY = 100;
+let sampleBuffer = []; // {ts, vu, iter, code, rt}
 let shuttingDown = false;
 
 parentPort.on('message', (msg) => {
@@ -248,18 +243,6 @@ parentPort.on('message', (msg) => {
         shuttingDown = true;
     }
 });
-
-// Variáveis dinâmicas por VU (ex.: usuários únicos)
-const vuSeed = Date.now() + id;
-function vuVars(iter) {
-    const uid = `${id}-${iter}-${Math.random().toString(36).slice(2, 8)}`;
-    return {
-        VU_ID: String(id),
-        VU_ITER: String(iter),
-        UNIQUE_EMAIL: `user_${uid}@example.com`,
-        UNIQUE_ID: uid,
-    };
-}
 
 // Coleta de métricas
 const metrics = {
@@ -271,8 +254,17 @@ const metrics = {
 };
 
 function pushLatency(ms) {
-    // clamp opcional para outliers absurdos
     if (Number.isFinite(ms) && ms >= 0) metrics.latencies.push(Math.min(ms, 10 * 60 * 1000));
+}
+
+function vuVars(iter) {
+    const uid = `${id}-${iter}-${Math.random().toString(36).slice(2, 8)}`;
+    return {
+        VU_ID: String(id),
+        VU_ITER: String(iter),
+        UNIQUE_EMAIL: `user_${uid}@example.com`,
+        UNIQUE_ID: uid,
+    };
 }
 
 async function runOnce(iter) {
@@ -283,15 +275,12 @@ async function runOnce(iter) {
             reporters: quiet ? [] : ['cli'],
             bail,
             timeoutRequest: timeout,
-            insecure, // permite TLS inválido se necessário
+            insecure,
             delayRequest: 0,
-            // Iteration data (vars por iteração)
             iterationData: [vuVars(iter)],
         };
 
-        // Captura de eventos para req/resp e falhas
         const t0 = Date.now();
-        const perRunReqT0 = new Map();
 
         const r = newman.run(params, (err, summary) => {
             metrics.runs += 1;
@@ -303,7 +292,6 @@ async function runOnce(iter) {
 
             if (summary?.run?.failures?.length) {
                 metrics.errors += summary.run.failures.length;
-                // loga as 3 primeiras falhas
                 if (!quiet) {
                     summary.run.failures.slice(0, 3).forEach((f, i) => {
                         const where = `${f.source?.name || 'item'} > ${f.error?.name || 'error'}`;
@@ -319,13 +307,11 @@ async function runOnce(iter) {
             resolve();
         });
 
-        r.on('request', (err, args) => {
+        r.on('request', (err) => {
             if (err) {
-                metrics.errors += 1; // erro antes/depois de enviar
+                metrics.errors += 1;
                 if (!quiet) parentPort.postMessage({ type: 'log', message: `Request error: ${err.message}` });
-                return;
             }
-            // ok: request foi emitida (contaremos no 'response')
         });
 
         r.on('response', (err, args) => {
@@ -342,24 +328,29 @@ async function runOnce(iter) {
                 if (Number.isFinite(rt)) pushLatency(rt);
                 metrics.httpCodes[code] = (metrics.httpCodes[code] || 0) + 1;
 
-                // CSV sample
+                // CSV sample (enviar em lotes)
                 sampleBuffer.push({ ts: Date.now(), vu: id, iter, code, rt: Number.isFinite(rt) ? rt : '' });
                 if (sampleBuffer.length >= SAMPLE_FLUSH_EVERY) {
-                    parentPort.postMessage({ type: 'samples', rows: sampleBuffer });
+                    const rows = sampleBuffer;
                     sampleBuffer = [];
+                    parentPort.postMessage({ type: 'samples', rows });
+                    if (!quiet) parentPort.postMessage({ type: 'log', message: `[samples] enviado lote com ${rows.length} linhas` });
                 }
-            } catch (_) { }
+            } catch (e) {
+                metrics.errors += 1;
+                if (!quiet) parentPort.postMessage({ type: 'log', message: `Response parse error: ${e.message}` });
+            }
         });
 
-        r.on('script', (err, evt) => {
+        r.on('script', (err) => {
             if (err) {
                 metrics.errors += 1;
                 if (!quiet) parentPort.postMessage({ type: 'log', message: `Script error: ${err.message}` });
             }
         });
 
-        r.on('assertion', (err, o) => {
-            if (err) metrics.errors += 1; // contar falhas de teste como erro
+        r.on('assertion', (err) => {
+            if (err) metrics.errors += 1;
         });
     });
 }
@@ -370,24 +361,27 @@ async function runOnce(iter) {
         await runOnce(i);
     }
 
-    // 🔹 Flush final do CSV (se ainda tiver linhas no buffer)
+    // Flush final de CSV (se sobrar)
     if (sampleBuffer.length) {
-        parentPort.postMessage({ type: 'samples', rows: sampleBuffer });
+        const rows = sampleBuffer;
         sampleBuffer = [];
+        parentPort.postMessage({ type: 'samples', rows });
+        if (!quiet) parentPort.postMessage({ type: 'log', message: `[samples] FLUSH FINAL com ${rows.length} linhas` });
     }
 
-    // 1) Envie TUDO antes de fechar
+    // Envie métricas finais
     parentPort.postMessage({ type: 'metrics', ...metrics });
 
-    // 2) Permite encerrar sem manter o event loop preso
+    // Encerramento limpo
     parentPort.unref?.();
-
-    // 3) Feche a porta (não envie mais msgs depois disso)
     parentPort.close?.();
-
-    // 4) Dá um tick para qualquer I/O pendente do runtime
     setImmediate(() => { });
 })().catch(e => {
+    if (sampleBuffer.length) {
+        const rows = sampleBuffer;
+        sampleBuffer = [];
+        parentPort.postMessage({ type: 'samples', rows });
+    }
     parentPort.postMessage({ type: 'log', message: `erro: ${e?.message || e}` });
     parentPort.postMessage({ type: 'metrics', ...metrics });
     parentPort.unref?.();
@@ -395,16 +389,17 @@ async function runOnce(iter) {
     setImmediate(() => { });
 });
 
-/** 
-node load - runner.js \
---collection=postman / local.postman_collection.json \
---stages="30:10" \
---iters=1 \
---timeout=60000 \
---keepAlive=true \
---insecure=false \
---bail=false \
---maxWorkers=64 \
---quiet=false \
---csv=out.csv  
+/**
+Exemplo:
+node load-runner.js \
+  --collection=postman/local.postman_collection.json \
+  --stages="30:10" \
+  --iters=1 \
+  --timeout=60000 \
+  --keepAlive=true \
+  --insecure=false \
+  --bail=false \
+  --maxWorkers=64 \
+  --quiet=false \
+  --csv=out.csv
 */
