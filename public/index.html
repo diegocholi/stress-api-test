@@ -1,23 +1,89 @@
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stress Lab</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
-<body><header><div class="brand"><span class="mark">↗</span> STRESS LAB</div><span class="badge">HTTP · CENÁRIOS · LOCAL</span></header>
-<main><div class="intro"><p class="eyebrow">PERFORMANCE COM EVIDÊNCIAS</p><h1>Coloque sua API<br>à prova.</h1><p>Configure a carga, acompanhe as respostas e descubra como sua API se comporta.</p></div>
-<div class="workspace"><section class="panel"><div class="section-title"><h2>Programar teste</h2><span>01 / CONFIGURAÇÃO</span></div>
-<form id="form"><label>Nome do teste<input name="name" placeholder="Ex.: autenticação · carga progressiva" maxlength="120"></label>
-<div class="tabs" role="tablist" aria-label="Origem do teste"><button id="builder-tab" type="button" role="tab" aria-selected="true" aria-controls="builder-panel">Criar pela interface</button><button id="postman-tab" type="button" role="tab" aria-selected="false" aria-controls="postman-panel" tabindex="-1">Postman</button></div>
-<fieldset id="builder-panel" role="tabpanel" aria-labelledby="builder-tab"><legend class="sr-only">Criar cenário pela interface</legend>
-<label>Variáveis do cenário<textarea id="variables" rows="2" placeholder="BASE_URL=http://127.0.0.1:4000"></textarea><small>Uma por linha: NOME=valor. Use {{NOME}} nas URLs, headers e no corpo.</small></label>
-<div class="section-title compact"><h3>Sequência de requisições</h3><button type="button" id="add-request" class="text-button">+ Requisição</button></div>
-<p class="help">Cada usuário executa as requisições na ordem abaixo e repete o cenário durante o estágio.</p><div id="requests"></div>
-<p class="help">Dados dinâmicos: {{VU_ID}}, {{VU_ITER}}, {{UNIQUE_ID}} e {{UNIQUE_EMAIL}}.</p></fieldset>
-<fieldset id="postman-panel" role="tabpanel" aria-labelledby="postman-tab" hidden disabled><legend class="sr-only">Importar Postman</legend>
-<div class="pair"><label>Collection Postman<input id="collection" type="file" accept=".json,application/json" required><small id="collection-name">Selecione uma collection com requisições.</small></label><label>Environment <span class="muted">opcional</span><input id="environment" type="file" accept=".json,application/json"></label></div>
-</fieldset><div class="section-title compact"><h3>Estágios de carga</h3><button type="button" id="add-stage" class="text-button">+ Adicionar</button></div><p class="help">Cada estágio mantém o número de usuários informado. Requisições em andamento terminam ao reduzir a carga.</p>
-<div class="stage-heading"><span>Duração (segundos)</span><span>Usuários simultâneos</span><span></span></div><div id="stages"></div>
-<div class="pair"><label>Limite de threads<input name="maxWorkers" type="number" min="1" max="32" value="4" required></label><label>Timeout (ms)<input name="timeout" type="number" min="1" max="600000" value="10000" required></label></div>
-<div class="pair"><label>Pausa entre cenários (ms)<input name="thinkTime" type="number" min="0" max="60000" value="0" required></label><label>Executar em <span class="muted">opcional</span><input name="scheduledAt" type="datetime-local"><small>Vazio: iniciar agora. Usa seu fuso local.</small></label></div>
-<div class="section-title compact"><h3>Critérios de aprovação</h3></div><div class="pair"><label>p95 máximo (ms)<input name="p95" type="number" min="1" max="600000" value="1000" required></label><label>Falhas HTTP / conexão (%)<input name="errorRate" type="number" min="0" max="100" step="0.1" value="1" required></label></div>
-<div class="checks"><label><input name="keepAlive" type="checkbox" checked> Reutilizar conexões</label><label><input name="bail" type="checkbox"> Interromper cenário ao falhar</label><label><input name="insecure" type="checkbox"> Aceitar certificado inválido</label></div>
-<p class="help">Assertions e scripts devem passar. Até 500 usuários por teste; a capacidade depende da máquina que gera a carga.</p><button class="primary" id="submit" type="submit">Iniciar ou agendar teste <span>↗</span></button><p id="message" role="status" aria-live="polite"></p></form></section>
-<section class="results"><div class="panel"><div class="section-title"><h2>Acompanhamento</h2><span id="status" class="badge">SEM EXECUÇÃO</span></div><h3 id="run-name">Seu próximo teste começa aqui.</h3><p id="run-info" class="help">Selecione uma execução no histórico para ver os resultados.</p><div class="metrics" id="metrics"></div><div class="chart-title"><span>Usuários ativos</span><span id="chart-caption">Últimas 60 leituras</span></div><svg id="chart" viewBox="0 0 600 150" role="img" aria-label="Evolução dos usuários ativos"><path id="chart-line" fill="none" stroke="#bef264" stroke-width="3"/></svg><div id="verdict" role="status"></div><div class="actions"><button type="button" id="cancel" hidden>Parar / cancelar</button><a id="csv" hidden>Baixar CSV ↗</a></div><pre id="details"></pre></div>
-<div class="panel history"><div class="section-title"><h2>Histórico e agenda</h2><span id="count">0 TESTES</span></div><div id="history"><p class="help">Nenhum teste programado.</p></div></div></section></div><footer>Modelo de usuários concorrentes · Latências por requisição · CSV com todas as tentativas</footer></main></body></html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101215"><title>Stress Lab · Performance</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+<svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h5l3-8 4 16 3-8h5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m1-16a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v2"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/></symbol>
+</defs></svg>
+<header class="topbar">
+  <a class="brand" href="#"><span class="mark">↗</span><span>stress<span class="brand-light">lab</span><small>API PERFORMANCE</small></span></a>
+  <div class="breadcrumb"><span>Workspace local</span><span class="slash">/</span><strong>Testes de carga</strong></div>
+  <div class="connection" id="connection"><span class="status-dot"></span><span id="connection-label">Conectando</span><span class="local-tag">LOCAL</span></div>
+</header>
+<aside class="sidebar" aria-label="Navegação principal">
+  <p class="nav-caption">WORKSPACE</p>
+  <nav><a class="nav-link active" href="#configure"><svg class="icon"><use href="#i-grid"/></svg><span>Configurar teste</span><span class="nav-arrow">↗</span></a><a class="nav-link" href="#monitor"><svg class="icon"><use href="#i-pulse"/></svg><span>Acompanhamento</span></a><a class="nav-link" href="#history-panel"><svg class="icon"><use href="#i-clock"/></svg><span>Histórico e agenda</span><span id="nav-count" class="nav-count">0</span></a></nav>
+  <div class="sidebar-note"><span class="note-symbol">↗</span><strong>Do cenário à evidência.</strong><p>Crie, execute e acompanhe seus testes em um só lugar.</p><span class="note-tag">HTTP / HTTPS</span></div>
+  <div class="sidebar-footer"><span class="status-dot"></span> Execução na sua máquina</div>
+</aside>
+<main>
+  <div class="intro"><div><p class="eyebrow"><span></span> SEU LABORATÓRIO DE PERFORMANCE</p><h1>Performance, <span>sob controle.</span></h1><p>Construa cenários. Aumente a carga. Entenda cada resposta.</p></div><a class="intro-action" href="#configure">Novo teste <svg class="icon"><use href="#i-plus"/></svg></a></div>
+  <section class="overview" aria-label="Resumo do workspace">
+    <div class="overview-card"><span class="overview-icon"><svg class="icon"><use href="#i-code"/></svg></span><div><span>Total de testes</span><strong id="overview-total">0</strong></div><small>no histórico</small></div>
+    <div class="overview-card"><span class="overview-icon green"><svg class="icon"><use href="#i-shield"/></svg></span><div><span>Concluídos</span><strong id="overview-completed">0</strong></div><small>execuções finalizadas</small></div>
+    <div class="overview-card"><span class="overview-icon amber"><svg class="icon"><use href="#i-clock"/></svg></span><div><span>Na agenda</span><strong id="overview-scheduled">0</strong></div><small>aguardando execução</small></div>
+  </section>
+  <div class="workspace">
+    <section class="panel config-panel" id="configure">
+      <div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-code"/></svg></div><div><h2>Configurar teste</h2><p>Um cenário bem definido. Resultados que fazem sentido.</p></div><span class="badge neutral">NOVO</span></div>
+      <form id="form">
+        <div class="form-content"><label>Nome do teste <span class="optional">opcional</span><input name="name" placeholder="Ex.: autenticação · carga progressiva" maxlength="120"></label>
+          <div class="tabs" role="tablist" aria-label="Origem do teste"><button id="builder-tab" type="button" role="tab" aria-selected="true" aria-controls="builder-panel"><svg class="icon"><use href="#i-code"/></svg>Criar pela interface</button><button id="postman-tab" type="button" role="tab" aria-selected="false" aria-controls="postman-panel" tabindex="-1"><svg class="icon"><use href="#i-upload"/></svg>Postman</button></div>
+          <fieldset id="builder-panel" role="tabpanel" aria-labelledby="builder-tab"><legend class="sr-only">Criar cenário pela interface</legend>
+            <div class="section-title"><div><span class="section-number">01</span><h3>Seu cenário</h3></div><span class="section-meta" id="request-count">1 REQUISIÇÃO</span></div>
+            <details class="variables-section"><summary><svg class="icon"><use href="#i-code"/></svg>Variáveis do cenário <span class="optional">opcional</span></summary><label class="sr-only" for="variables">Variáveis do cenário</label><textarea id="variables" rows="3" placeholder="BASE_URL=http://127.0.0.1:4000"></textarea><small>Uma por linha: NOME=valor. Use {{NOME}} nas URLs, headers e no corpo.</small></details>
+            <p class="help">As requisições são executadas em sequência por cada usuário.</p><div id="requests"></div>
+            <button type="button" id="add-request" class="add-button"><svg class="icon"><use href="#i-plus"/></svg>Adicionar requisição</button>
+            <div class="variable-hint"><span>Dados dinâmicos</span><code>{{VU_ID}}</code><code>{{VU_ITER}}</code><code>{{UNIQUE_ID}}</code><code>{{UNIQUE_EMAIL}}</code></div>
+          </fieldset>
+          <fieldset id="postman-panel" role="tabpanel" aria-labelledby="postman-tab" hidden disabled><legend class="sr-only">Importar Postman</legend>
+            <div class="section-title"><div><span class="section-number">01</span><h3>Importar cenário</h3></div><span class="section-meta">POSTMAN</span></div>
+            <div class="upload-area"><svg class="icon"><use href="#i-upload"/></svg><h3>Sua collection, pronta para rodar.</h3><p>Importe suas requisições e validações em um arquivo JSON.</p><label>Collection Postman<input id="collection" type="file" accept=".json,application/json" required><small id="collection-name">Selecione uma collection com requisições.</small></label></div>
+            <label class="environment-label">Environment <span class="optional">opcional</span><input id="environment" type="file" accept=".json,application/json"></label>
+          </fieldset>
+          <section class="form-section"><div class="section-title"><div><span class="section-number">02</span><h3>Carga e execução</h3></div><span class="section-meta" id="load-summary">90s · ATÉ 20 USUÁRIOS</span></div>
+            <p class="help">Defina a duração e os usuários simultâneos de cada estágio.</p>
+            <div class="stage-heading"><span>Duração em segundos</span><span>Usuários simultâneos</span><span></span></div><div id="stages"></div>
+            <button type="button" id="add-stage" class="text-button"><svg class="icon"><use href="#i-plus"/></svg>Adicionar estágio</button>
+            <div class="pair"><label>Limite de threads<input name="maxWorkers" type="number" min="1" max="32" value="4" required></label><label>Timeout <span class="field-unit">ms</span><input name="timeout" type="number" min="1" max="600000" value="10000" required></label></div>
+            <div class="pair"><label>Pausa entre cenários <span class="field-unit">ms</span><input name="thinkTime" type="number" min="0" max="60000" value="0" required></label><label>Data e hora <span class="optional">opcional</span><input name="scheduledAt" type="datetime-local"><small>Vazio para iniciar agora. Usa seu fuso local.</small></label></div>
+          </section>
+          <section class="form-section"><div class="section-title"><div><span class="section-number">03</span><h3>Critérios de aprovação</h3></div><svg class="icon muted"><use href="#i-shield"/></svg></div>
+            <div class="pair"><label>p95 máximo <span class="field-unit">ms</span><input name="p95" type="number" min="1" max="600000" value="1000" required></label><label>Falhas HTTP / conexão <span class="field-unit">%</span><input name="errorRate" type="number" min="0" max="100" step="0.1" value="1" required></label></div>
+            <details class="advanced"><summary>Opções de execução</summary><div class="checks"><label><input name="keepAlive" type="checkbox" checked> Reutilizar conexões</label><label><input name="bail" type="checkbox"> Interromper cenário ao falhar</label><label><input name="insecure" type="checkbox"> Aceitar certificado inválido</label></div></details>
+            <p class="help footnote">As validações e os scripts também precisam passar. Até 500 usuários por teste.</p>
+          </section>
+        </div>
+        <div class="form-submit"><div class="submit-note"><span class="status-dot"></span> Pronto para colocar à prova</div><button class="primary" id="submit" type="submit"><span>Iniciar ou agendar teste</span><svg class="icon"><use href="#i-arrow"/></svg></button><p id="message" role="status" aria-live="polite"></p></div>
+      </form>
+    </section>
+    <section class="results">
+      <div class="panel monitor-panel" id="monitor">
+        <div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-pulse"/></svg></div><div><h2>Acompanhamento</h2><p>Cada resposta conta.</p></div><span id="status" class="badge neutral">SEM EXECUÇÃO</span></div>
+        <div class="monitor-content"><div class="run-heading"><span class="eyebrow">EXECUÇÃO SELECIONADA</span><h3 id="run-name">Tudo pronto para o primeiro teste.</h3><p id="run-info" class="help">Seus resultados aparecem aqui assim que você iniciar.</p></div>
+          <div class="metrics" id="metrics"></div>
+          <div class="chart-container"><div class="chart-title"><span><span class="legend-dot"></span>Usuários ativos</span><span id="chart-caption">Últimas 60 leituras</span></div><div class="chart-plot"><svg id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="Evolução dos usuários ativos"><defs><linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c0f780" stop-opacity=".18"/><stop offset="100%" stop-color="#c0f780" stop-opacity="0"/></linearGradient></defs><path id="chart-area" fill="url(#chart-gradient)"/><path id="chart-line" fill="none" stroke="#c0f780" stroke-width="2.5" vector-effect="non-scaling-stroke"/><circle id="chart-point" r="3.5" fill="#c0f780" hidden/></svg><span id="chart-empty">Aguardando dados da execução</span></div><div class="chart-axis"><span>Início da janela</span><span>Agora</span></div></div>
+          <div id="verdict" class="verdict pending" role="status">Configure seu cenário e inicie um teste para acompanhar os resultados.</div>
+          <div class="actions"><button type="button" id="cancel" hidden>Parar / cancelar</button><a id="csv" hidden>Exportar CSV <span>↗</span></a></div>
+          <details class="diagnostics" id="diagnostics" hidden><summary>Detalhes da execução</summary><pre id="details"></pre></details>
+        </div>
+      </div>
+      <div class="panel history" id="history-panel"><div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-clock"/></svg></div><div><h2>Histórico e agenda</h2><p>Suas execuções, organizadas.</p></div><span id="count" class="badge neutral">0 TESTES</span></div><div id="history" class="history-content"><div class="empty-history"><svg class="icon"><use href="#i-clock"/></svg><strong>Seu histórico começa aqui.</strong><p>Testes executados e agendados aparecem neste painel.</p></div></div></div>
+    </section>
+  </div>
+  <footer><span><span class="status-dot"></span> Stress Lab · Workspace local</span><span>Requisições reais. Evidências por execução.</span></footer>
+</main>
+</body>
+</html>
