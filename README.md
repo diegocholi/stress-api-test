@@ -1,88 +1,73 @@
-Pré-reqs: Node 18+, `npm i newman` (sem `async`, usamos Promises nativas).
+# Stress Lab
 
-Coloque sua collection em `postman/*.postman_collection.json` e (opcional) um environment.
+Gerador de carga HTTP real com editor de cenários pela interface, importação Postman, agendamento e resultados exportáveis. Requer Node.js 18+.
 
-## Como usar
+```bash
+npm start
+```
 
-- **Rampa de carga (stages)**: `"duracaoSeg:concorrencia"`, separados por vírgula.
+Esse comando instala as dependências automaticamente quando necessário e inicia a interface. Na primeira execução, é necessário acesso à internet.
 
-  > stage: 30:200 → Durante 30 segundos, manter 200 usuários ativos em paralelo rodando sua collection Postman.
+Abra http://127.0.0.1:3000. A configuração tem duas abas:
 
-- **Exemplos:**
+- **Criar pela interface**: monte uma sequência de requisições com método, URL, headers e corpo JSON ou texto. Adicione, remova e reordene os passos. Defina status esperado, texto que a resposta deve conter e campos JSON com valores esperados. Nenhum arquivo Postman é necessário.
+- **Postman**: envie uma collection v2/v2.1 e, opcionalmente, um environment.
+
+As duas abas usam os mesmos estágios, timeout, pausa entre cenários, threads, métricas e critérios de aprovação. Deixe a data vazia para executar agora ou escolha uma data futura para agendar.
+
+No editor, variáveis são escritas uma por linha (`BASE_URL=http://127.0.0.1:4000`) e headers como `Authorization: Bearer {{TOKEN}}`. Use `{{NOME}}` na URL, nos headers e no corpo. Para um fluxo de login, extraia o campo `data.token` da resposta e salve em `TOKEN`; os próximos passos podem usar `{{TOKEN}}`. A extração vale dentro da execução do cenário de cada usuário. Caminhos JSON usam pontos, inclusive índices de arrays (`items.0.id`), e valores esperados usam sintaxe JSON (`123`, `true`, `"texto"`).
+
+A agenda e o histórico persistem em `.runs/`, ignorado pelo Git. O servidor precisa estar ligado para executar os agendamentos. Um teste roda por vez; agendamentos sobrepostos entram na fila. Ao reiniciar, testes interrompidos são marcados como falha e agendamentos pendentes voltam à fila. A interface permite cancelar e baixar o CSV ao terminar. Collections e environments de testes pendentes são armazenados localmente com permissões restritas e removidos do histórico ao encerrar. Não use o histórico para compartilhar credenciais.
+
+## Experimentar com uma API local
+
+Em um terminal:
+
+```bash
+npm run demo:target
+```
+
+Em outro, execute `npm start`. Na aba **Criar pela interface**, informe `GET http://127.0.0.1:4000/health` com status esperado `200`. Para experimentar a aba **Postman**, selecione os dois JSON de `examples/`. A collection verifica `GET /health` na API de exemplo, sem acessar serviços externos.
+
+## Linha de comando
 
 ```bash
 node load-runner.js \
-  --collection=postman/autenticador.postman_collection.json \
-  --environment=postman/localhost.postman_environment.json \ # [Opcional]
-  --stages="30:200,60:2000,120:10000,120:20000" \
-  --iters=3 \
-  --timeout=60000 \
+  --collection=examples/local.postman_collection.json \
+  --environment=examples/local.postman_environment.json \
+  --stages="10:2,20:5,5:0" \
+  --maxWorkers=2 \
+  --timeout=10000 \
+  --thinkTime=0 \
   --keepAlive=true \
-  --insecure=false \
-  --bail=false \
-  --maxWorkers=64 \
-  --quiet=true \
-  --envVar="UA=<UA_DO_BROWSER>,COOKIE=<COOKIE_COPIADO>" \ # [Opcional]
-  --csv=out.csv  # [Opcional]
+  --p95=1000 \
+  --errorRate=1 \
+  --csv=out.csv
 ```
 
-> Dica: rode **vários processos** (ou containers) desse runner em máquinas diferentes para atingir 30k+ concorrentes. Use um **balanceador**/coletor (ex.: Prometheus + Pushgateway ou logs centralizados) se quiser métricas unificadas.
+O CLI imprime snapshots JSON e retorna código 0 somente quando o teste conclui e passa nos critérios. SIGINT/SIGTERM cancela e preserva métricas parciais. `--iters` foi removido: cada usuário repete a collection durante o estágio. Não há limite de iterações que esvazie a carga antes do tempo. Variáveis `VU_ID`, `VU_ITER`, `UNIQUE_ID` e `UNIQUE_EMAIL` estão disponíveis como dados da iteração.
 
----
+## Como a medição funciona
 
-## Boas práticas para chegar em 20–30k simultâneos
+- Modelo fechado: cada usuário executa uma collection por vez e a repete. Threads hospedam vários usuários assíncronos. `maxWorkers` limita realmente o total de threads (1–32); o limite de usuários é 500 por estágio.
+- Estágios são degraus de concorrência, não uma rampa linear nem uma taxa fixa de chegadas. Inicialização leva tempo; acompanhe usuários ativos versus alvo. Reduções deixam as collections em andamento terminar. Ao final, há drenagem limitada por prazo. Cancelar impede novas execuções e aguarda as collections em andamento, dentro do prazo de encerramento.
+- Um único evento Newman `request` contabiliza tentativas HTTP, incluindo `pm.sendRequest`, respostas e falhas de transporte. Não há soma duplicada com `summary.run.executions`.
+- HTTP ≥400 e falhas de transporte contam como requisições com falha. Assertions, scripts e erros de execução têm contadores próprios; qualquer falha nesses contadores reprova o teste. Taxa HTTP = requisições com falha / total de tentativas, sem misturar a quantidade de assertions.
+- p50/p95/p99 vêm exclusivamente do `responseTime` das requisições com resposta. Timeouts sem resposta entram na taxa de falhas, sem uma latência inventada. Histograma com resolução de 1 ms e teto de 600.000 ms; não usa amostragem enviesada. Não há percentil quando não há respostas.
+- RPS é a média desde o início, incluindo inicialização e drenagem. Métricas parciais chegam a cada 500 ms ou 100 requisições. CSV contém uma linha por tentativa; o buffer de escrita tem limite de 8 MB e o teste falha explicitamente se o disco não acompanhar.
+- Keep-alive é aplicado com agentes HTTP/HTTPS explícitos, conforme a [API oficial do Newman](https://github.com/postmanlabs/newman#newmanrunoptions-object--callback-function).
+- Memória e atraso do event loop ajudam a identificar sobrecarga do gerador. CPU, banco, filas e memória da API precisam ser monitorados no ambiente de destino. O número de usuários configurado sozinho não comprova capacidade da API.
 
-1. **Open vs. Closed Model**
+A interface fica em `127.0.0.1`; serve para uso local. Porta configurável com `PORT=3001 npm start`. Importação limitada a 5 MB. O projeto não inclui execução distribuída, controle de RPS ou agendamento recorrente.
 
-   - _Open (arrivals controlados por RPS)_ é melhor para saturar o sistema. Este runner simula “closed” por VUs. Para _open_, adapte para criar novos VUs continuamente por taxa pretendida (RPS).
+## Validação
 
-2. **Ramp-up gradual**
+```bash
+npm test
+```
 
-   - Evita “thundering herd”. Aumente em degraus (ex. 2k → 5k → 10k → 20k).
+Os testes usam um servidor HTTP local e conferem carga sustentada, limite de threads, contagem exata, chamadas de scripts, falhas HTTP, assertions, timeouts, cancelamento, integridade do CSV e cenários criados pela interface, incluindo login, extração de token e chamada autenticada.
 
-3. **Keep-Alive + Reuso de conexões**
+## Dependências
 
-   - Reduz custo por request. (Ativado no script com `--keepAlive=true` por padrão).
-
-4. **Reduza I/O**
-
-   - Use `--quiet=true` e evite reporters verbosos. Stdout é gargalo.
-
-5. **Dados dinâmicos**
-
-   - Variáveis por VU/iteração (`UNIQUE_EMAIL`, `UNIQUE_ID`) para evitar cache/duplicidade do backend.
-
-6. **Timeouts realistas**
-
-   - `--timeout` coerente com seus SLOs. Conte timeouts como erros.
-
-7. **Ambiente e variações**
-
-   - Tenha environment Postman por ambiente (dev/stage/prod). Parametrize baseURL, tokens, etc.
-
-8. **Correlação**
-
-   - Se a collection obtém token e usa depois, mantenha as requisições na mesma execução Newman (este script faz isso). Se precisar _data feeders_ maiores, troque `iterationData` por CSV/JSON girando por VU.
-
-9. **Escala horizontal**
-
-   - Para 30k VUs, distribua: múltiplas VMs/containers + orquestração simples (makefile/bash) já resolve.
-
-10. **Observabilidade**
-
-- Colete logs/metrics do **SUT** (sistema sob teste) também: CPU, memória, fila, DB, cache, erro por rota. Os dois lados contam a história.
-
----
-
-## Quando migrar para ferramentas de carga dedicadas
-
-Se o objetivo é **controle fino de RPS**, cenários complexos, e **distribuição nativa**:
-
-- **k6** (scripts em JS, fácil “stages” e thresholds; há conversores de collection Postman).
-- **Artillery** (YAML/JS, ótimo para cenários HTTP/WebSocket; tem plugin para Postman).
-- **JMeter/Gatling** (maduros, distribuídos).
-
-Você pode manter sua collection como **fonte de verdade** e:
-
-- Converter para k6 (há conversores de Postman → k6).
-- Ou usar Artillery importando a collection.
+A instalação usa Newman 6.2.2 no lockfile. Foi aplicada a atualização compatível de dependências; `npm audit` ainda reportou 19 vulnerabilidades transitivas (8 moderadas, 10 altas e 1 crítica). Não foi aplicado `--force`, pois a proposta do npm envolve trocar a versão principal do Newman. Importe apenas collections e scripts de origem confiável; a interface local não elimina esses problemas da dependência.

@@ -1,0 +1,157 @@
+const $ = id => document.getElementById(id);
+const stages = $('stages'); let selected, runs = [], points = [], lastPoint;
+let mode = 'builder';
+const labels = {scheduled:'Agendado',running:'Executando',stopping:'Encerrando',completed:'Concluído',failed:'Falhou',cancelled:'Cancelado'};
+function addStage(duration=30,target=10) {
+  const row = document.createElement('div'); row.className='stage';
+  row.innerHTML='<input type="number" min="1" max="86400" required aria-label="Duração do estágio em segundos"><input type="number" min="0" max="500" required aria-label="Usuários do estágio"><button type="button" aria-label="Remover estágio">×</button>';
+  row.children[0].value=duration; row.children[1].value=target;
+  row.children[2].onclick=()=>{if(stages.children.length>1) row.remove();}; stages.append(row);
+}
+addStage(); addStage(60,20);
+$('add-stage').onclick=()=>{if(stages.children.length<50)addStage();};
+
+function setMode(next) {
+  mode=next;
+  for (const tab of ['builder','postman']) {
+    const active=tab===next;
+    $(tab+'-tab').setAttribute('aria-selected',String(active));
+    $(tab+'-tab').tabIndex=active ? 0 : -1;
+    $(tab+'-panel').hidden=!active;
+    $(tab+'-panel').disabled=!active;
+  }
+}
+for (const tab of ['builder','postman']) {
+  $(tab+'-tab').onclick=()=>setMode(tab);
+  $(tab+'-tab').onkeydown=event=>{
+    if (['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
+      event.preventDefault(); const next=event.key==='Home'?'builder':event.key==='End'?'postman':mode==='builder'?'postman':'builder';
+      setMode(next); $(next+'-tab').focus();
+    }
+  };
+}
+function updateRequests() {
+  const rows=[...$('requests').children];
+  rows.forEach((row,index)=>{
+    row.querySelector('strong').textContent=`REQUISIÇÃO ${String(index+1).padStart(2,'0')}`;
+    row.querySelector('[data-action="up"]').disabled=index===0;
+    row.querySelector('[data-action="down"]').disabled=index===rows.length-1;
+    row.querySelector('[data-action="remove"]').disabled=rows.length===1;
+  });
+  $('add-request').disabled=rows.length>=50;
+}
+function addRequest() {
+  if ($('requests').children.length>=50) return;
+  const row=document.createElement('div');row.className='request-card';
+  row.innerHTML=`<div class="request-head"><strong></strong><div class="request-controls"><button type="button" data-action="up" aria-label="Mover requisição para cima">↑</button><button type="button" data-action="down" aria-label="Mover requisição para baixo">↓</button><button type="button" data-action="remove" aria-label="Remover requisição">×</button></div></div>
+    <label>Nome da requisição<input data-field="name" placeholder="Ex.: criar cliente" maxlength="120"></label>
+    <div class="endpoint"><label>Método<select data-field="method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label><label>URL<input data-field="url" placeholder="https://sua-api.com/endpoint" required></label></div>
+    <details><summary>Headers e corpo da requisição</summary>
+      <label>Headers<textarea data-field="headers" rows="3" placeholder="Authorization: Bearer {{TOKEN}}&#10;Accept: application/json"></textarea><small>Um por linha: Nome: valor.</small></label>
+      <label>Tipo de corpo<select data-field="bodyType"><option value="none">Sem corpo</option><option value="json">JSON</option><option value="text">Texto</option></select></label>
+      <label data-body-label hidden>Corpo<textarea data-field="body" rows="5" placeholder='{"email":"{{UNIQUE_EMAIL}}"}' disabled></textarea><small>Use variáveis para dados dinâmicos. JSON recebe Content-Type automaticamente.</small></label>
+    </details>
+    <details><summary>Validações e extração de variáveis</summary>
+      <div class="pair"><label>Status esperado<input data-field="expectedStatus" type="number" min="100" max="599" value="200" placeholder="Opcional"></label><label>Resposta contém<input data-field="contains" placeholder="Texto opcional"></label></div>
+      <div class="pair"><label>Campo JSON<input data-field="jsonPath" placeholder="data.id"></label><label>Valor esperado (JSON)<input data-field="jsonValue" placeholder='123 ou "texto" ou true'></label></div>
+      <small>O caminho usa pontos, como items.0.id. O valor precisa ser JSON válido.</small>
+      <div class="pair"><label>Extrair campo JSON<input data-field="extractPath" placeholder="data.token"></label><label>Salvar na variável<input data-field="extractVariable" placeholder="TOKEN"></label></div>
+      <small>Nas próximas requisições, use {{TOKEN}} para o valor extraído.</small>
+    </details>`;
+  row.querySelector('[data-field="bodyType"]').onchange=event=>{
+    const visible=event.target.value!=='none';row.querySelector('[data-body-label]').hidden=!visible;row.querySelector('[data-field="body"]').disabled=!visible;
+  };
+  row.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>{
+    const action=button.dataset.action;
+    if(action==='up'&&row.previousElementSibling)row.parentNode.insertBefore(row,row.previousElementSibling);
+    if(action==='down'&&row.nextElementSibling)row.parentNode.insertBefore(row.nextElementSibling,row);
+    if(action==='remove'&&$('requests').children.length>1)row.remove();
+    updateRequests();
+  });
+  $('requests').append(row);updateRequests();
+}
+function pairs(value, separator, label) {
+  return value.split(/\r?\n/).filter(line=>line.trim()).map(line=>{
+    const at=line.indexOf(separator);
+    if(at<1)throw new Error(`${label}: use Nome${separator} valor, um por linha.`);
+    return {key:line.slice(0,at).trim(),value:line.slice(at+1).trim()};
+  });
+}
+function readScenario() {
+  return {variables:pairs($('variables').value,'=','Variáveis'),steps:[...$('requests').children].map((row,index)=>{
+    const value=field=>row.querySelector(`[data-field="${field}"]`).value;
+    const step={name:value('name'),method:value('method'),url:value('url').trim(),headers:pairs(value('headers'),':','Headers'),
+      bodyType:value('bodyType'),body:value('body'),expectedStatus:value('expectedStatus'),contains:value('contains')};
+    if(value('jsonPath')||value('jsonValue')) {
+      if(!value('jsonPath')||!value('jsonValue'))throw new Error(`Requisição ${index+1}: informe o campo e o valor JSON esperado.`);
+      try {step.jsonCheck={path:value('jsonPath').trim(),value:JSON.parse(value('jsonValue'))};}
+      catch {throw new Error(`Requisição ${index+1}: valor esperado precisa ser JSON válido.`);}
+    }
+    if(value('extractPath')||value('extractVariable')) {
+      if(!value('extractPath')||!value('extractVariable'))throw new Error(`Requisição ${index+1}: informe o campo e o nome da variável extraída.`);
+      step.extract={path:value('extractPath').trim(),variable:value('extractVariable').trim()};
+    }
+    return step;
+  })};
+}
+$('add-request').onclick=addRequest;
+addRequest();setMode('builder');
+
+async function api(url, data) {
+  const res = await fetch(url,data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  const result = await res.json(); if(!res.ok)throw new Error(result.error || 'Falha na requisição'); return result;
+}
+async function readFile(id, required=false) {
+  const file=$(id).files[0]; if(!file){if(required)throw new Error('Selecione a collection');return undefined;}
+  if(file.size>5*1024*1024)throw new Error('Arquivo excede 5 MB');
+  try{return JSON.parse(await file.text());}catch{throw new Error(`${file.name}: JSON inválido`);}
+}
+$('collection').onchange=async()=>{try{const c=await readFile('collection');$('collection-name').textContent=c?.info?.name || 'Collection sem nome';}catch(e){$('collection-name').textContent=e.message;}};
+$('form').onsubmit=async event=>{
+  event.preventDefault(); $('submit').disabled=true; $('message').textContent='Preparando teste…'; $('message').className='';
+  try {
+    const form=event.target.elements;
+    const source = mode === 'builder' ? {scenario:readScenario()} : {collection:await readFile('collection',true),environment:await readFile('environment')};
+    const input={name:form.name.value,mode,...source,
+      stages:[...stages.children].map(row=>({durationSec:Number(row.children[0].value),target:Number(row.children[1].value)})),
+      maxWorkers:Number(form.maxWorkers.value),timeout:Number(form.timeout.value),thinkTime:Number(form.thinkTime.value),
+      keepAlive:form.keepAlive.checked,bail:form.bail.checked,insecure:form.insecure.checked,
+      thresholds:{p95:Number(form.p95.value),errorRate:Number(form.errorRate.value)},
+      scheduledAt:form.scheduledAt.value ? new Date(form.scheduledAt.value).toISOString() : undefined};
+    const job=await api('/api/runs',input); selected=job.id;points=[];lastPoint=null;
+    $('message').textContent=input.scheduledAt?'Teste agendado. Mantenha o servidor aberto para executar.':'Teste iniciado.'; await refresh();
+  }catch(e){$('message').textContent=e.message;$('message').className='error';}
+  finally{$('submit').disabled=false;}
+};
+function render(job) {
+  const s=job.result || {}; $('status').textContent=labels[job.status] || job.status;
+  $('run-name').textContent=job.name;
+  $('run-info').textContent=`${new Date(job.scheduledAt).toLocaleString()} · Estágio ${s.stage || 0} · ${Number(s.elapsed || 0).toFixed(1)} segundos`;
+  const metrics=[['Requisições',s.requests ?? 0,'Tentativas HTTP'],['RPS',Number(s.rps || 0).toFixed(1),'Média da execução'],['Usuários',`${s.active || 0} / ${s.target || 0}`,'Ativos / alvo'],['p95',s.p95 == null?'—':`${s.p95} ms`,'95% das respostas'],['p99',s.p99 == null?'—':`${s.p99} ms`,'99% das respostas'],['Falhas',`${Number(s.errorRate || 0).toFixed(2)}%`,'HTTP ≥400 ou conexão']];
+  $('metrics').replaceChildren(...metrics.map(([label,value,help])=>{const el=document.createElement('div');el.className='metric';for(const [tag,text]of [['span',label],['strong',value],['small',help]]){const child=document.createElement(tag);child.textContent=text;el.append(child);}return el;}));
+  if(s.elapsed && s.elapsed !== lastPoint){points.push(s.active||0);if(points.length>60)points.shift();lastPoint=s.elapsed;}
+  const max=Math.max(1,...points);$('chart-line').setAttribute('d',points.map((n,i)=>`${i?'L':'M'} ${i*600/Math.max(1,points.length-1)} ${145-n/max*130}`).join(' '));
+  $('chart-caption').textContent=`Máximo visível: ${max} usuários`;
+  $('verdict').textContent=s.failure || (job.status==='completed'?(s.passed?'Aprovado nos critérios configurados.':'Reprovado nos critérios configurados.'):
+    job.status==='scheduled'?'Aguardando horário. Se houver um teste ativo, entrará na fila.':job.status==='cancelled'?'Execução cancelada. Resultados parciais.':'Coletando resultados. A aprovação é avaliada no encerramento.');
+  $('verdict').className=s.failure || (job.status==='completed'&&!s.passed)?'error':'';
+  $('cancel').hidden=!['scheduled','running','stopping'].includes(job.status);
+  $('csv').hidden=!['completed','cancelled','failed'].includes(job.status) || !s.csvRows;
+  $('csv').href=`/api/runs/${job.id}/csv`;
+  $('details').textContent=job.result ? `HTTP: ${Object.entries(s.codes||{}).map(([code,n])=>`${code}: ${n}`).join(' · ')}\nConexão: ${s.transportErrors||0} · Assertions: ${s.assertionFailures||0} · Scripts: ${s.scriptFailures||0} · Execuções: ${s.runFailures||0}\nMemória do gerador: ${Number(s.rssMB||0).toFixed(0)} MB · Atraso do event loop: ${Number(s.eventLoopLagMs||0).toFixed(0)} ms` : '';
+}
+$('cancel').onclick=async()=>{try{await api(`/api/runs/${selected}/cancel`,{});await refresh();}catch(e){$('message').textContent=e.message;}};
+async function refresh(){
+  runs=await api('/api/runs');$('count').textContent=`${runs.length} TESTES`;
+  if(!selected&&runs.length)selected=runs[0].id;
+  $('history').replaceChildren(...runs.map(job=>{
+    const button=document.createElement('button');button.type='button';button.className='history-row';
+    const title=document.createElement('strong');title.textContent=job.name;
+    const info=document.createElement('span');info.textContent=`${labels[job.status]||job.status} · ${new Date(job.scheduledAt).toLocaleString()}`;
+    button.append(title,info);button.onclick=()=>{selected=job.id;points=[];lastPoint=null;render(job);};return button;
+  }));
+  if(!runs.length)$('history').textContent='Nenhum teste programado.';
+  const job=runs.find(j=>j.id===selected);if(job)render(job);
+}
+async function poll(){try{await refresh();}catch(e){$('status').textContent='SEM CONEXÃO';}finally{setTimeout(poll,1000);}}
+poll();
