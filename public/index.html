@@ -15,6 +15,7 @@
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m1-16a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v2"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M4 3h13l4 4v14H3V3h1Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/></symbol>
 </defs></svg>
 <header class="topbar">
@@ -24,12 +25,12 @@
 </header>
 <aside class="sidebar" aria-label="Navegação principal">
   <p class="nav-caption">WORKSPACE</p>
-  <nav><a class="nav-link active" href="#configure"><svg class="icon"><use href="#i-grid"/></svg><span>Configurar teste</span><span class="nav-arrow">↗</span></a><a class="nav-link" href="#monitor"><svg class="icon"><use href="#i-pulse"/></svg><span>Acompanhamento</span></a><a class="nav-link" href="#history-panel"><svg class="icon"><use href="#i-clock"/></svg><span>Histórico e agenda</span><span id="nav-count" class="nav-count">0</span></a></nav>
+  <nav><a class="nav-link active" href="#configure"><svg class="icon"><use href="#i-grid"/></svg><span>Configurar teste</span><span class="nav-arrow">↗</span></a><a class="nav-link" href="#saved-panel"><svg class="icon"><use href="#i-save"/></svg><span>Testes salvos</span><span id="saved-nav-count" class="nav-count">0</span></a><a class="nav-link" href="#monitor"><svg class="icon"><use href="#i-pulse"/></svg><span>Acompanhamento</span></a><a class="nav-link" href="#history-panel"><svg class="icon"><use href="#i-clock"/></svg><span>Histórico e agenda</span><span id="nav-count" class="nav-count">0</span></a></nav>
   <div class="sidebar-note"><span class="note-symbol">↗</span><strong>Do cenário à evidência.</strong><p>Crie, execute e acompanhe seus testes em um só lugar.</p><span class="note-tag">HTTP / HTTPS</span></div>
   <div class="sidebar-footer"><span class="status-dot"></span> Execução na sua máquina</div>
 </aside>
 <main>
-  <div class="intro"><div><p class="eyebrow"><span></span> SEU LABORATÓRIO DE PERFORMANCE</p><h1>Performance, <span>sob controle.</span></h1><p>Construa cenários. Aumente a carga. Entenda cada resposta.</p></div><a class="intro-action" href="#configure">Novo teste <svg class="icon"><use href="#i-plus"/></svg></a></div>
+  <div class="intro"><div><p class="eyebrow"><span></span> SEU LABORATÓRIO DE PERFORMANCE</p><h1>Performance, <span>sob controle.</span></h1><p>Construa cenários. Aumente a carga. Entenda cada resposta.</p></div><button type="button" class="intro-action" id="new-test">Novo teste <svg class="icon"><use href="#i-plus"/></svg></button></div>
   <section class="overview" aria-label="Resumo do workspace">
     <div class="overview-card"><span class="overview-icon"><svg class="icon"><use href="#i-code"/></svg></span><div><span>Total de testes</span><strong id="overview-total">0</strong></div><small>no histórico</small></div>
     <div class="overview-card"><span class="overview-icon green"><svg class="icon"><use href="#i-shield"/></svg></span><div><span>Concluídos</span><strong id="overview-completed">0</strong></div><small>execuções finalizadas</small></div>
@@ -37,9 +38,9 @@
   </section>
   <div class="workspace">
     <section class="panel config-panel" id="configure">
-      <div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-code"/></svg></div><div><h2>Configurar teste</h2><p>Um cenário bem definido. Resultados que fazem sentido.</p></div><span class="badge neutral">NOVO</span></div>
+      <div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-code"/></svg></div><div><h2>Configurar teste</h2><p>Um cenário bem definido. Resultados que fazem sentido.</p></div><span id="editor-status" class="badge neutral">NOVO</span></div>
       <form id="form">
-        <div class="form-content"><label>Nome do teste <span class="optional">opcional</span><input name="name" placeholder="Ex.: autenticação · carga progressiva" maxlength="120"></label>
+        <div class="form-content"><div id="editing-note" class="editing-note" hidden><svg class="icon"><use href="#i-save"/></svg><span id="editing-label"></span><button type="button" id="detach-template">Criar novo</button></div><label>Nome do teste <span class="optional">opcional</span><input name="name" placeholder="Ex.: autenticação · carga progressiva" maxlength="120"></label>
           <div class="tabs" role="tablist" aria-label="Origem do teste"><button id="builder-tab" type="button" role="tab" aria-selected="true" aria-controls="builder-panel"><svg class="icon"><use href="#i-code"/></svg>Criar pela interface</button><button id="postman-tab" type="button" role="tab" aria-selected="false" aria-controls="postman-panel" tabindex="-1"><svg class="icon"><use href="#i-upload"/></svg>Postman</button></div>
           <fieldset id="builder-panel" role="tabpanel" aria-labelledby="builder-tab"><legend class="sr-only">Criar cenário pela interface</legend>
             <div class="section-title"><div><span class="section-number">01</span><h3>Seu cenário</h3></div><span class="section-meta" id="request-count">1 REQUISIÇÃO</span></div>
@@ -51,7 +52,7 @@
           <fieldset id="postman-panel" role="tabpanel" aria-labelledby="postman-tab" hidden disabled><legend class="sr-only">Importar Postman</legend>
             <div class="section-title"><div><span class="section-number">01</span><h3>Importar cenário</h3></div><span class="section-meta">POSTMAN</span></div>
             <div class="upload-area"><svg class="icon"><use href="#i-upload"/></svg><h3>Sua collection, pronta para rodar.</h3><p>Importe suas requisições e validações em um arquivo JSON.</p><label>Collection Postman<input id="collection" type="file" accept=".json,application/json" required><small id="collection-name">Selecione uma collection com requisições.</small></label></div>
-            <label class="environment-label">Environment <span class="optional">opcional</span><input id="environment" type="file" accept=".json,application/json"></label>
+            <label class="environment-label">Environment <span class="optional">opcional</span><input id="environment" type="file" accept=".json,application/json"><small id="environment-name"></small></label><button id="clear-environment" class="text-button" type="button" hidden>Remover environment</button>
           </fieldset>
           <section class="form-section"><div class="section-title"><div><span class="section-number">02</span><h3>Carga e execução</h3></div><span class="section-meta" id="load-summary">90s · ATÉ 20 USUÁRIOS</span></div>
             <p class="help">Defina a duração e os usuários simultâneos de cada estágio.</p>
@@ -66,7 +67,7 @@
             <p class="help footnote">As validações e os scripts também precisam passar. Até 500 usuários por teste.</p>
           </section>
         </div>
-        <div class="form-submit"><div class="submit-note"><span class="status-dot"></span> Pronto para colocar à prova</div><button class="primary" id="submit" type="submit"><span>Iniciar ou agendar teste</span><svg class="icon"><use href="#i-arrow"/></svg></button><p id="message" role="status" aria-live="polite"></p></div>
+        <div class="form-submit"><div class="save-actions"><button type="button" id="save-test" class="save-button"><svg class="icon"><use href="#i-save"/></svg><span id="save-label">Salvar teste</span></button><button type="button" id="save-copy" hidden>Salvar como novo</button></div><div class="submit-note"><span class="status-dot"></span> Pronto para colocar à prova</div><button class="primary" id="submit" type="submit"><span>Iniciar ou agendar teste</span><svg class="icon"><use href="#i-arrow"/></svg></button><p id="message" role="status" aria-live="polite"></p></div>
       </form>
     </section>
     <section class="results">
@@ -76,10 +77,11 @@
           <div class="metrics" id="metrics"></div>
           <div class="chart-container"><div class="chart-title"><span><span class="legend-dot"></span>Usuários ativos</span><span id="chart-caption">Últimas 60 leituras</span></div><div class="chart-plot"><svg id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="Evolução dos usuários ativos"><defs><linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c0f780" stop-opacity=".18"/><stop offset="100%" stop-color="#c0f780" stop-opacity="0"/></linearGradient></defs><path id="chart-area" fill="url(#chart-gradient)"/><path id="chart-line" fill="none" stroke="#c0f780" stroke-width="2.5" vector-effect="non-scaling-stroke"/><circle id="chart-point" r="3.5" fill="#c0f780" hidden/></svg><span id="chart-empty">Aguardando dados da execução</span></div><div class="chart-axis"><span>Início da janela</span><span>Agora</span></div></div>
           <div id="verdict" class="verdict pending" role="status">Configure seu cenário e inicie um teste para acompanhar os resultados.</div>
-          <p id="report-message" class="help" role="status" hidden></p><div class="actions"><button type="button" id="cancel" hidden>Parar / cancelar</button><a id="xlsx" hidden>Baixar relatório XLSX <span>↗</span></a></div>
+          <p id="report-message" class="help" role="status" hidden></p><div id="repeat-source" class="repeat-source" hidden><label for="repeat-template">Teste salvo para repetir</label><select id="repeat-template"><option value="">Selecione um teste salvo</option></select><small>Esta execução antiga não guardou a configuração. Escolha um teste da biblioteca.</small></div><div class="actions"><button type="button" id="repeat" class="repeat-button" hidden><svg class="icon"><use href="#i-pulse"/></svg>Executar novamente</button><button type="button" id="cancel" hidden>Parar / cancelar</button><a id="xlsx" hidden>Baixar relatório XLSX <span>↗</span></a></div><p id="repeat-message" class="help error" role="status" hidden></p>
           <details class="diagnostics" id="diagnostics" hidden><summary>Detalhes da execução</summary><pre id="details"></pre></details>
         </div>
       </div>
+      <div class="panel saved-panel" id="saved-panel"><div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-save"/></svg></div><div><h2>Testes salvos</h2><p>Seus cenários, prontos para reutilizar.</p></div><span id="saved-count" class="badge neutral">0 TESTES</span></div><div class="library-toolbar"><label class="sr-only" for="saved-search">Buscar testes salvos</label><input id="saved-search" type="search" placeholder="Buscar pelo nome do teste…"><span class="help">Carregue um teste para editar, executar ou agendar.</span></div><div id="saved-list" class="saved-content"></div><p id="library-message" class="library-message" role="status" aria-live="polite"></p></div>
       <div class="panel history" id="history-panel"><div class="panel-heading"><div class="heading-icon"><svg class="icon"><use href="#i-clock"/></svg></div><div><h2>Histórico e agenda</h2><p>Suas execuções, organizadas.</p></div><span id="count" class="badge neutral">0 TESTES</span></div><div id="history" class="history-content"><div class="empty-history"><svg class="icon"><use href="#i-clock"/></svg><strong>Seu histórico começa aqui.</strong><p>Testes executados e agendados aparecem neste painel.</p></div></div></div>
     </section>
   </div>

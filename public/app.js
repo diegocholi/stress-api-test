@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const stages = $('stages'); let selected, runs = [], points = [], lastPoint;
 let mode = 'builder';
+let loadedTemplate=null,templates=[],dirty=false,cachedCollection,cachedEnvironment,librarySignature='',editorBusy=false;
 function icon(name) {
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('icon');svg.setAttribute('aria-hidden','true');
   const use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href',`#i-${name}`);svg.append(use);return svg;
@@ -24,10 +25,10 @@ function addStage(duration=30,target=10) {
   const row = document.createElement('div'); row.className='stage';
   row.innerHTML='<input type="number" min="1" max="86400" required aria-label="Duração do estágio em segundos"><input type="number" min="0" max="500" required aria-label="Usuários do estágio"><button type="button" aria-label="Remover estágio">×</button>';
   row.children[0].value=duration; row.children[1].value=target;
-  row.children[2].onclick=()=>{if(stages.children.length>1) row.remove();updateLoadSummary();}; stages.append(row);updateLoadSummary();
+  row.children[2].onclick=()=>{if(stages.children.length>1) row.remove();updateLoadSummary();markDirty();}; stages.append(row);updateLoadSummary();
 }
 addStage(); addStage(60,20);
-$('add-stage').onclick=()=>{if(stages.children.length<50)addStage();};
+$('add-stage').onclick=()=>{if(stages.children.length<50){addStage();markDirty();}};
 
 function setMode(next) {
   mode=next;
@@ -40,11 +41,11 @@ function setMode(next) {
   }
 }
 for (const tab of ['builder','postman']) {
-  $(tab+'-tab').onclick=()=>setMode(tab);
+  $(tab+'-tab').onclick=()=>{setMode(tab);markDirty();};
   $(tab+'-tab').onkeydown=event=>{
     if (['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
       event.preventDefault(); const next=event.key==='Home'?'builder':event.key==='End'?'postman':mode==='builder'?'postman':'builder';
-      setMode(next); $(next+'-tab').focus();
+      setMode(next);markDirty(); $(next+'-tab').focus();
     }
   };
 }
@@ -59,7 +60,7 @@ function updateRequests() {
   $('add-request').disabled=rows.length>=50;
   $('request-count').textContent=`${rows.length} ${rows.length===1?'REQUISIÇÃO':'REQUISIÇÕES'}`;
 }
-function addRequest() {
+function addRequest(step={}) {
   if ($('requests').children.length>=50) return;
   const row=document.createElement('div');row.className='request-card';
   row.innerHTML=`<div class="request-head"><div class="request-identity"><strong></strong><span class="request-label">Requisição</span><span class="method-badge">GET</span></div><div class="request-controls"><button type="button" data-action="up" aria-label="Mover requisição para cima">↑</button><button type="button" data-action="down" aria-label="Mover requisição para baixo">↓</button><button type="button" data-action="remove" aria-label="Remover requisição">×</button></div></div>
@@ -87,8 +88,17 @@ function addRequest() {
     if(action==='up'&&row.previousElementSibling)row.parentNode.insertBefore(row,row.previousElementSibling);
     if(action==='down'&&row.nextElementSibling)row.parentNode.insertBefore(row.nextElementSibling,row);
     if(action==='remove'&&$('requests').children.length>1)row.remove();
-    updateRequests();
+    updateRequests();markDirty();
   });
+  const field=(name,value)=>{row.querySelector(`[data-field="${name}"]`).value=value ?? '';};
+  for(const name of ['name','url','body','contains'])if(step[name]!==undefined)field(name,step[name]);
+  if(step.method)field('method',step.method);if(step.bodyType)field('bodyType',step.bodyType);
+  if(step.expectedStatus!==undefined)field('expectedStatus',step.expectedStatus);
+  if(step.headers)field('headers',step.headers.map(h=>`${h.key}: ${h.value}`).join('\n'));
+  if(step.jsonCheck){field('jsonPath',step.jsonCheck.path);field('jsonValue',JSON.stringify(step.jsonCheck.value));}
+  if(step.extract){field('extractPath',step.extract.path);field('extractVariable',step.extract.variable);}
+  row.querySelector('[data-field="method"]').dispatchEvent(new Event('change'));
+  row.querySelector('[data-field="bodyType"]').dispatchEvent(new Event('change'));
   $('requests').append(row);updateRequests();
 }
 function pairs(value, separator, label) {
@@ -115,7 +125,7 @@ function readScenario() {
     return step;
   })};
 }
-$('add-request').onclick=addRequest;
+$('add-request').onclick=()=>{addRequest();markDirty();};
 addRequest();setMode('builder');
 
 async function api(url, data) {
@@ -127,31 +137,166 @@ async function readFile(id, required=false) {
   if(file.size>5*1024*1024)throw new Error('Arquivo excede 5 MB');
   try{return JSON.parse(await file.text());}catch{throw new Error(`${file.name}: JSON inválido`);}
 }
-$('collection').onchange=async()=>{try{const c=await readFile('collection');$('collection-name').textContent=c?.info?.name || 'Collection sem nome';}catch(e){$('collection-name').textContent=e.message;}};
+$('collection').onchange=async()=>{try{const c=await readFile('collection');$('collection-name').textContent=c?.info?.name || cachedCollection?.info?.name || 'Selecione uma collection com requisições.';}catch(e){$('collection-name').textContent=e.message;}};
+$('form').addEventListener('invalid',()=>{$('message').className='error';$('message').textContent='Preencha os campos obrigatórios ou carregue um teste salvo antes de executar.';},true);
 $('form').onsubmit=async event=>{
   event.preventDefault(); $('submit').disabled=true; $('message').textContent='Preparando teste…'; $('message').className='';
   updateLoadSummary();
   try {
-    const form=event.target.elements;
-    const source = mode === 'builder' ? {scenario:readScenario()} : {collection:await readFile('collection',true),environment:await readFile('environment')};
-    const input={name:form.name.value,mode,...source,
-      stages:[...stages.children].map(row=>({durationSec:Number(row.children[0].value),target:Number(row.children[1].value)})),
-      maxWorkers:Number(form.maxWorkers.value),timeout:Number(form.timeout.value),thinkTime:Number(form.thinkTime.value),
-      keepAlive:form.keepAlive.checked,bail:form.bail.checked,insecure:form.insecure.checked,
-      thresholds:{p95:Number(form.p95.value),errorRate:Number(form.errorRate.value)},
-      scheduledAt:form.scheduledAt.value ? new Date(form.scheduledAt.value).toISOString() : undefined};
+    const input=await collectInput(true);
     const job=await api('/api/runs',input); selected=job.id;points=[];lastPoint=null;
     $('message').textContent=input.scheduledAt?'Teste agendado. Mantenha o servidor aberto para executar.':'Teste iniciado.'; await refresh();
   }catch(e){$('message').textContent=e.message;$('message').className='error';}
   finally{$('submit').disabled=false;}
 };
+
+async function collectInput(includeSchedule=false) {
+  const form=$('form').elements;
+  const source=mode==='builder'?{scenario:readScenario()}:{collection:$('collection').files.length?await readFile('collection',true):cachedCollection,environment:$('environment').files.length?await readFile('environment'):cachedEnvironment};
+  if(mode==='postman' && !source.collection)throw new Error('Selecione uma collection');
+  const input={name:form.name.value,mode,...source,
+    stages:[...stages.children].map(row=>({durationSec:Number(row.children[0].value),target:Number(row.children[1].value)})),
+    maxWorkers:Number(form.maxWorkers.value),timeout:Number(form.timeout.value),thinkTime:Number(form.thinkTime.value),
+    keepAlive:form.keepAlive.checked,bail:form.bail.checked,insecure:form.insecure.checked,
+    thresholds:{p95:Number(form.p95.value),errorRate:Number(form.errorRate.value)}};
+  if(includeSchedule && form.scheduledAt.value)input.scheduledAt=new Date(form.scheduledAt.value).toISOString();
+  return input;
+}
+function editorState() {
+  $('editor-status').textContent=dirty?'NÃO SALVO':loadedTemplate?'SALVO':'NOVO';
+  $('editor-status').className=`badge ${dirty?'scheduled':loadedTemplate?'completed':'neutral'}`;
+  $('editing-note').hidden=!loadedTemplate;
+  $('editing-label').textContent=loadedTemplate?`Editando: ${loadedTemplate.name} · versão ${loadedTemplate.revision}`:'';
+  $('save-label').textContent=loadedTemplate?'Salvar alterações':'Salvar teste';
+  $('save-copy').hidden=!loadedTemplate;
+}
+function markDirty(event) {if(event?.target?.name==='scheduledAt')return;dirty=true;editorState();}
+$('form').addEventListener('input',markDirty);$('form').addEventListener('change',markDirty);
+function setEditorBusy(value) {
+  editorBusy=value;$('form').inert=value;$('new-test').disabled=value;$('save-test').disabled=value;$('save-copy').disabled=value;renderLibrary();
+}
+function canReplace() {if(editorBusy){libraryMessage('Aguarde a operação atual terminar.');return false;}return !dirty || window.confirm('Há alterações não salvas. Deseja substituí-las?');}
+function resetEditor() {
+  $('form').reset();loadedTemplate=null;cachedCollection=cachedEnvironment=undefined;
+  $('collection').required=true;$('collection-name').textContent='Selecione uma collection com requisições.';
+  $('environment-name').textContent='';$('clear-environment').hidden=true;
+  $('requests').replaceChildren();addRequest();stages.replaceChildren();addStage();addStage(60,20);setMode('builder');
+  dirty=false;editorState();$('message').textContent='';renderLibrary();
+}
+function newTest() {if(!canReplace())return;resetEditor();location.hash='#configure';$('form').elements.name.focus();}
+$('new-test').onclick=newTest;$('detach-template').onclick=newTest;
+$('clear-environment').onclick=()=>{cachedEnvironment=undefined;$('environment').value='';$('environment-name').textContent='';$('clear-environment').hidden=true;markDirty();};
+async function loadTemplate(id) {
+  if(!canReplace())return false;
+  setEditorBusy(true);
+  try {
+    const item=await api(`/api/templates/${id}`),d=item.definition;
+    resetEditor();const form=$('form').elements;
+    for(const name of ['name','maxWorkers','timeout','thinkTime'])form[name].value=d[name];
+    for(const name of ['keepAlive','bail','insecure'])form[name].checked=d[name];
+    form.p95.value=d.thresholds.p95;form.errorRate.value=d.thresholds.errorRate;
+    stages.replaceChildren();d.stages.forEach(stage=>addStage(stage.durationSec,stage.target));
+    if(d.mode==='builder') {
+      $('requests').replaceChildren();d.scenario.steps.forEach(addRequest);
+      $('variables').value=(d.scenario.variables || []).map(v=>`${v.key}=${v.value}`).join('\n');
+    } else {
+      cachedCollection=d.collection;cachedEnvironment=d.environment;
+      $('collection').required=false;$('collection-name').textContent=`Carregada: ${d.collection.info.name || d.name}. Selecione um arquivo para substituir.`;
+      $('environment-name').textContent=d.environment?`Carregado: ${d.environment.name || 'Environment salvo'}`:'';
+      $('clear-environment').hidden=!d.environment;
+    }
+    setMode(d.mode);loadedTemplate={id:item.id,name:d.name,revision:item.revision};dirty=false;editorState();renderLibrary();
+    $('message').textContent='Teste carregado. Você pode editar, executar ou agendar.';
+    location.hash='#configure';return true;
+  } catch(e) {libraryMessage(e.message,true);return false;}
+  finally{setEditorBusy(false);}
+}
+async function saveTemplate(asNew=false) {
+  if(editorBusy || !$('form').reportValidity())return;
+  setEditorBusy(true);
+  try {
+    const input=await collectInput();const editing=loadedTemplate && !asNew;
+    if(editing)input.revision=loadedTemplate.revision;
+    const item=await api(editing?`/api/templates/${loadedTemplate.id}`:'/api/templates',input);
+    loadedTemplate={id:item.id,name:item.name,revision:item.revision};$('form').elements.name.value=item.name;dirty=false;editorState();
+    $('message').className='';$('message').textContent=editing?'Alterações salvas.':'Teste salvo na sua biblioteca.';
+    await refreshLibrary();
+  }catch(e){$('message').textContent=e.message;$('message').className='error';}
+  finally{setEditorBusy(false);}
+}
+$('save-test').onclick=()=>saveTemplate();$('save-copy').onclick=()=>saveTemplate(true);
+function libraryMessage(message,error=false) {$('library-message').textContent=message;$('library-message').classList.toggle('error',error);}
+async function duplicateTemplate(id) {
+  if(editorBusy)return;
+  try {await api(`/api/templates/${id}/duplicate`,{});await refreshLibrary();libraryMessage('Cópia criada na biblioteca.');}catch(e){libraryMessage(e.message,true);}
+}
+async function deleteTemplate(item) {
+  if(editorBusy)return;
+  if(!window.confirm(`Excluir o teste salvo "${item.name}"? O histórico de execuções será mantido.`))return;
+  try {
+    await api(`/api/templates/${item.id}/delete`,{});
+    if(loadedTemplate?.id===item.id){loadedTemplate=null;dirty=true;editorState();}
+    await refreshLibrary();libraryMessage('Teste excluído. O histórico foi mantido.');
+  }catch(e){libraryMessage(e.message,true);}
+}
+function renderLibrary() {
+  const search=$('saved-search').value.trim().toLocaleLowerCase('pt-BR');
+  const signature=JSON.stringify([templates,loadedTemplate?.id,search,editorBusy]);if(signature===librarySignature)return;librarySignature=signature;
+  $('saved-count').textContent=`${templates.length} ${templates.length===1?'TESTE':'TESTES'}`;$('saved-nav-count').textContent=templates.length;
+  const filtered=templates.filter(item=>item.name.toLocaleLowerCase('pt-BR').includes(search));
+  $('saved-list').replaceChildren(...filtered.map(item=>{
+    const card=document.createElement('div');card.className='saved-item';card.dataset.selected=String(item.id===loadedTemplate?.id);
+    const title=document.createElement('div');title.className='saved-title';const name=document.createElement('strong');name.textContent=item.name;
+    const badge=document.createElement('span');badge.className='badge neutral';badge.textContent=item.mode==='builder'?'INTERFACE':'POSTMAN';title.append(name,badge);
+    const meta=document.createElement('span');meta.className='saved-meta';meta.textContent=`${item.steps} requisições · ${item.durationSec}s · até ${item.peakUsers} usuários · atualizado em ${new Date(item.updatedAt).toLocaleString()}`;
+    const actions=document.createElement('div');actions.className='saved-actions';
+    for(const [label,cls,action]of [['Carregar','load-template',()=>loadTemplate(item.id)],['Duplicar','duplicate-template',()=>duplicateTemplate(item.id)],['Excluir','delete-template',()=>deleteTemplate(item)]]){
+      const button=document.createElement('button');button.type='button';button.className=cls;button.textContent=label;button.disabled=editorBusy;button.setAttribute('aria-label',`${label} ${item.name}`);button.onclick=action;actions.append(button);
+    }
+    card.append(title,meta,actions);return card;
+  }));
+  if(!filtered.length){const empty=document.createElement('div');empty.className='empty-history';const title=document.createElement('strong');title.textContent=search?'Nenhum teste encontrado.':'Salve seu primeiro cenário.';const help=document.createElement('p');help.textContent=search?'Tente buscar por outro nome.':'Configure um teste e clique em Salvar teste para reutilizá-lo depois.';empty.append(icon('save'),title,help);$('saved-list').append(empty);}
+}
+async function refreshLibrary() {templates=await api('/api/templates');renderLibrary();}
+$('saved-search').oninput=renderLibrary;
+editorState();
+
 function renderMetrics(s={}) {
   const metrics=[['Requisições',s.requests ?? 0,'Tentativas HTTP'],['RPS',Number(s.rps || 0).toFixed(1),'Média da execução'],['Usuários',`${s.active || 0} / ${s.target || 0}`,'Ativos / alvo'],['p95',s.p95 == null?'—':`${s.p95} ms`,'95% das respostas'],['p99',s.p99 == null?'—':`${s.p99} ms`,'99% das respostas'],['Falhas',`${Number(s.errorRate || 0).toFixed(2)}%`,'HTTP ≥400 ou conexão']];
   $('metrics').replaceChildren(...metrics.map(([label,value,help])=>{const el=document.createElement('div');el.className='metric';for(const [tag,text]of [['span',label],['strong',value],['small',help]]){const child=document.createElement(tag);child.textContent=text;if(tag==='span')child.append(icon(label==='Usuários'?'users':label==='Falhas'?'shield':label==='Requisições'?'code':label==='RPS'?'pulse':'clock'));el.append(child);}return el;}));
 }
 renderMetrics();
+function repeatSources(job) {
+  const signature=JSON.stringify(templates.map(t=>[t.id,t.name]));
+  if($('repeat-template').dataset.signature!==signature) {
+    const previous=$('repeat-template').value;const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Selecione um teste salvo';
+    $('repeat-template').replaceChildren(placeholder,...templates.map(t=>{const option=document.createElement('option');option.value=t.id;option.textContent=t.name;return option;}));
+    $('repeat-template').value=previous;$('repeat-template').dataset.signature=signature;
+  }
+  if($('repeat-template').dataset.run!==job.id) {$('repeat-template').value='';$('repeat-template').dataset.run=job.id;}
+}
+$('repeat').onclick=async()=>{
+  const job=runs.find(item=>item.id===selected);if(!job)return;
+  $('repeat').disabled=true;$('repeat-message').hidden=true;
+  try {
+    let next;
+    if(job.canRepeat)next=await api(`/api/runs/${job.id}/repeat`,{});
+    else {
+      const id=$('repeat-template').value;
+      if(!id){$('repeat-template').focus();throw new Error('Escolha um teste salvo acima para executar novamente.');}
+      const template=await api(`/api/templates/${id}`);
+      next=await api('/api/runs',template.definition);
+    }
+    selected=next.id;points=[];lastPoint=null;$('message').className='';$('message').textContent='Nova execução iniciada. O relatório anterior continua no histórico.';
+    await refresh();
+  }catch(error){$('message').className='error';$('message').textContent=error.message;$('repeat-message').hidden=false;$('repeat-message').textContent=error.message;$('repeat-message').dataset.run=job.id;}
+  finally{$('repeat').disabled=false;}
+};
 function render(job) {
-  const s=job.result || {}; $('status').textContent=labels[job.status] || job.status;
+  const s=job.result || {};if($('repeat-message').dataset.run!==job.id)$('repeat-message').hidden=true;const finished=['completed','cancelled','failed'].includes(job.status);
+  $('repeat').hidden=!finished;$('repeat-source').hidden=!finished || job.canRepeat;
+  if(finished&&!job.canRepeat)repeatSources(job);
+  $('status').textContent=labels[job.status] || job.status;
   const statusClass=job.status==='completed'?(s.passed?'completed':'failed'):['running','stopping'].includes(job.status)?'running':job.status==='scheduled'?'scheduled':job.status==='failed'?'failed':'neutral';
   $('status').className=`badge ${statusClass}`;
   $('run-name').textContent=job.name;
@@ -180,7 +325,7 @@ function render(job) {
 }
 $('cancel').onclick=async()=>{try{await api(`/api/runs/${selected}/cancel`,{});await refresh();}catch(e){$('message').textContent=e.message;}};
 async function refresh(){
-  runs=await api('/api/runs');$('count').textContent=`${runs.length} ${runs.length===1?'TESTE':'TESTES'}`;
+  const data=await Promise.all([api('/api/runs'),api('/api/templates')]);runs=data[0];templates=data[1];renderLibrary();$('count').textContent=`${runs.length} ${runs.length===1?'TESTE':'TESTES'}`;
   $('connection').classList.remove('offline');$('connection-label').textContent='Servidor conectado';
   $('overview-total').textContent=runs.length;$('nav-count').textContent=runs.length;
   $('overview-completed').textContent=runs.filter(job=>job.status==='completed').length;

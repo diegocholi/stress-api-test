@@ -5,8 +5,11 @@ const {randomUUID} = require('node:crypto');
 const {Runner} = require('./lib/runner');
 const {validate} = require('./lib/config');
 const {generateReport}=require('./lib/report/run');
+const {TemplateStore,definition}=require('./lib/templates');
 const exportsInProgress=new Map();
 const ROOT = process.env.STRESS_DATA_DIR || path.join(__dirname, '.runs'); fs.mkdirSync(ROOT, {recursive: true, mode: 0o700});
+const templates=new TemplateStore(ROOT);
+const INPUTS=path.join(ROOT,'inputs');fs.mkdirSync(INPUTS,{recursive:true,mode:0o700});
 const jobs = new Map(); let current;
 const save = job => {
   const filename = path.join(ROOT, `${job.id}.json`), temporary = `${filename}.tmp`;
@@ -16,18 +19,33 @@ for (const name of fs.readdirSync(ROOT).filter(n => /^[a-f0-9-]+\.json$/.test(n)
   try {
     const job = JSON.parse(fs.readFileSync(path.join(ROOT,name), 'utf8'));
     if (['running','stopping'].includes(job.status)) {job.status = 'failed'; job.result = {...job.result, status: 'failed', failure: 'Servidor reiniciado durante o teste'}; delete job.config; save(job);}
-    jobs.set(job.id, job);
+    job.canRepeat=fs.existsSync(path.join(INPUTS,`${job.id}.json`));jobs.set(job.id, job);
   } catch (err) {console.error(`Histórico inválido: ${name}: ${err.message}`);}
 }
-const view = job => ({id: job.id, name: job.name, status: job.status, scheduledAt: job.scheduledAt, createdAt: job.createdAt, result: job.result});
+const view = job => ({id: job.id, name: job.name, status: job.status, scheduledAt: job.scheduledAt, createdAt: job.createdAt, result: job.result, canRepeat: job.canRepeat===true, repeatedFrom:job.repeatedFrom});
 async function execute(job) {
-  current = {job}; job.status = 'running'; save(job);
+  const execution={job};current=execution;
   try {
-    const runner = new Runner({...job.config,name:job.name,source:job.source,reportContext:{id:job.id,createdAt:job.createdAt,scheduledAt:job.scheduledAt}}, path.join(ROOT, `${job.id}.xlsx`)); current.runner = runner;
-    runner.on('snapshot', result => {job.result = result; job.status = result.status;});
-    job.result = await runner.start(); job.status = job.result.status;
-  } catch (err) {job.status = 'failed'; job.result = {status: 'failed', failure: err.message};}
-  delete job.config; save(job); current = null;
+    job.status='running';save(job);
+    const runner=new Runner({...job.config,name:job.name,source:job.source,reportContext:{id:job.id,createdAt:job.createdAt,scheduledAt:job.scheduledAt,repeatedFrom:job.repeatedFrom}},path.join(ROOT,`${job.id}.xlsx`));execution.runner=runner;
+    runner.on('snapshot',result=>{job.result=result;job.status=result.status;});
+    job.result=await runner.start();job.status=job.result.status;
+  } catch(err){job.status='failed';job.result={status:'failed',failure:err.message};}
+  finally {
+    delete job.config;
+    try{save(job);}catch(err){console.error(`Falha ao salvar a execução ${job.id}: ${err.message}`);}
+    finally{if(current===execution)current=null;}
+  }
+}
+function launch(input,repeatedFrom) {
+  const config=validate(input);
+  if(input.scheduledAt && (!Number.isFinite(Date.parse(input.scheduledAt)) || Date.parse(input.scheduledAt)<=Date.now()))throw new Error('Agende uma data futura');
+  if(!input.scheduledAt && current)throw Object.assign(new Error('Já existe um teste ativo. Aguarde ou agende outro.'),{statusCode:409});
+  const job={id:randomUUID(),name:String(input.name || config.collection.info.name || 'Teste').slice(0,120),config,source:input.mode==='builder'?'Interface':'Postman',
+    createdAt:new Date().toISOString(),scheduledAt:input.scheduledAt || new Date().toISOString(),status:'scheduled',canRepeat:true,...(repeatedFrom?{repeatedFrom}:{})};
+  const filename=path.join(INPUTS,`${job.id}.json`),temporary=`${filename}.tmp`;
+  fs.writeFileSync(temporary,JSON.stringify(definition(input)),{mode:0o600});fs.renameSync(temporary,filename);
+  save(job);jobs.set(job.id,job);if(!input.scheduledAt)void execute(job);return job;
 }
 const scheduler = setInterval(() => {
   if (current) return;
@@ -46,19 +64,29 @@ const server = http.createServer(async (req,res) => {
     // Local control surface: reject cross-origin mutation attempts.
     if (req.method === 'POST' && ((req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) || req.headers['content-type']?.split(';')[0] !== 'application/json')) return json(res,403,{error:'Origem ou tipo de conteúdo inválido'});
     const url = new URL(req.url, 'http://localhost');
+    if(url.pathname==='/api/templates' && req.method==='GET')return json(res,200,templates.list());
+    if(url.pathname==='/api/templates' && req.method==='POST')return json(res,201,templates.create(await body(req)));
+    const templateRoute=url.pathname.match(/^\/api\/templates\/([a-f0-9-]+)(?:\/(duplicate|delete))?$/);
+    if(templateRoute) {
+      const [,id,action]=templateRoute;
+      if(!action && req.method==='GET')return json(res,200,templates.get(id));
+      if(!action && req.method==='POST')return json(res,200,templates.update(id,await body(req)));
+      if(action==='duplicate' && req.method==='POST')return json(res,201,templates.duplicate(id));
+      if(action==='delete' && req.method==='POST'){templates.delete(id);return json(res,200,{deleted:true});}
+    }
     if (url.pathname === '/api/runs' && req.method === 'GET') return json(res,200,[...jobs.values()].reverse().map(view));
     if (url.pathname === '/api/runs' && req.method === 'POST') {
-      const input = await body(req); const config = validate(input);
-      if (input.scheduledAt && (!Number.isFinite(Date.parse(input.scheduledAt)) || Date.parse(input.scheduledAt) <= Date.now())) throw new Error('Agende uma data futura');
-      if (!input.scheduledAt && current) return json(res,409,{error:'Já existe um teste ativo. Aguarde ou agende outro.'});
-      const job = {id: randomUUID(), name: String(input.name || config.collection.info.name || 'Teste').slice(0,120), config,source:input.mode==='builder'?'Interface':'Postman',
-        createdAt: new Date().toISOString(), scheduledAt: input.scheduledAt || new Date().toISOString(), status:'scheduled'};
-      jobs.set(job.id,job); save(job); if (!input.scheduledAt) void execute(job);
-      return json(res,201,view(job));
+      return json(res,201,view(launch(await body(req))));
     }
-    const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|xlsx)$/);
+    const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|xlsx|repeat)$/);
     if (match) {
       const job = jobs.get(match[1]); if (!job) return json(res,404,{error:'Teste não encontrado'});
+      if(match[2]==='repeat' && req.method==='POST') {
+        if(!['completed','cancelled','failed'].includes(job.status))return json(res,409,{error:'Aguarde o teste terminar antes de repetir.'});
+        const filename=path.join(INPUTS,`${job.id}.json`);
+        if(!fs.existsSync(filename))return json(res,409,{error:'Esta execução antiga não registrou a configuração. Escolha um teste salvo para repetir.'});
+        return json(res,201,view(launch(JSON.parse(fs.readFileSync(filename,'utf8')),job.id)));
+      }
       if (match[2] === 'cancel' && req.method === 'POST') {
         if (current?.job.id === job.id) current.runner?.stop();
         else if (job.status === 'scheduled') {job.status = 'cancelled'; delete job.config; save(job);}
@@ -88,7 +116,7 @@ const server = http.createServer(async (req,res) => {
       return fs.createReadStream(path.join(__dirname,'public',files[url.pathname])).pipe(res);
     }
     json(res,404,{error:'Não encontrado'});
-  } catch (err) {json(res,400,{error:err.message});}
+  } catch (err) {json(res,err.statusCode || 400,{error:err.message});}
 });
 server.listen(Number(process.env.PORT || 3000), '127.0.0.1', () => console.log(`Stress Lab: http://127.0.0.1:${server.address().port}`));
 async function shutdown() {clearInterval(scheduler); current?.runner?.stop(); server.close();}

@@ -36,7 +36,16 @@ test('web API imports, schedules persist, cancels, executes and downloads final 
   let received=0;const target=http.createServer((_req,res)=>{received++;res.end('ok');});
   await new Promise(resolve=>target.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>target.close(resolve)));
   collection.item[0].request.url=`http://127.0.0.1:${target.address().port}`;
-  const immediate=(await call('/api/runs',input)).data;
+  const savedResponse=await call('/api/templates',{name:'Health salvo',mode:'builder',scenario:{steps:[{method:'GET',url:collection.item[0].request.url,expectedStatus:200}]},stages:'1:1',maxWorkers:1});
+  assert.equal(savedResponse.response.status,201);const saved=savedResponse.data;
+  assert.equal((await call('/api/runs')).data.filter(j=>j.status==='running').length,0,'saving does not execute');
+  await stop(app.child);app=await boot(dir);
+  assert.equal((await call('/api/templates')).data[0].id,saved.id);
+  const loaded=(await call(`/api/templates/${saved.id}`)).data;
+  const updated=await call(`/api/templates/${saved.id}`,{...loaded.definition,name:'Health atualizado',revision:loaded.revision});assert.equal(updated.data.revision,2);
+  assert.equal((await call(`/api/templates/${saved.id}`,{...loaded.definition,revision:1})).response.status,409);
+  const copy=(await call(`/api/templates/${saved.id}/duplicate`,{})).data;assert.notEqual(copy.id,saved.id);
+  const immediate=(await call('/api/runs',(await call(`/api/templates/${saved.id}`)).data.definition)).data;
   assert.equal((await call('/api/runs',input)).response.status,409);
   for(let i=0;i<80;i++){
     jobs=(await call('/api/runs')).data;
@@ -50,6 +59,20 @@ test('web API imports, schedules persist, cancels, executes and downloads final 
   assert.equal(workbook.getWorksheet('Requisições 1').rowCount-6,received);
   assert.equal(workbook.getWorksheet('Resumo').getCell('A9').value,received);
   const stored=JSON.parse(fs.readFileSync(path.join(dir,`${immediate.id}.json`)));assert.equal(stored.config,undefined);
+  assert.equal((await call(`/api/templates/${saved.id}/delete`,{})).response.status,200);
+  assert.equal((await call(`/api/templates/${saved.id}`)).response.status,404);
+  assert.ok((await call('/api/runs')).data.some(j=>j.id===immediate.id),'deleting a template preserves run history');
+  // Replay must use the original snapshot even after deleting the saved template.
+  const repeat=await call(`/api/runs/${immediate.id}/repeat`,{});assert.equal(repeat.response.status,201,JSON.stringify(repeat.data));
+  assert.notEqual(repeat.data.id,immediate.id);assert.equal(repeat.data.repeatedFrom,immediate.id);
+  for(let i=0;i<80;i++) {
+    jobs=(await call('/api/runs')).data;if(jobs.find(j=>j.id===repeat.data.id)?.result?.reportStatus==='ready')break;await pause(100);
+  }
+  const repeated=jobs.find(j=>j.id===repeat.data.id);assert.equal(repeated.status,'completed');assert.ok(repeated.result.requests>0);assert.equal(repeated.canRepeat,true);
+  assert.equal(jobs.find(j=>j.id===immediate.id).result.requests,result.result.requests,'original results are retained');
+  assert.ok(fs.existsSync(path.join(dir,`${immediate.id}.xlsx`)));assert.ok(fs.existsSync(path.join(dir,`${repeated.id}.xlsx`)));
+  assert.equal(fs.statSync(path.join(dir,'inputs',`${immediate.id}.json`)).mode&0o777,0o600);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'inputs',`${scheduled.data.id}.json`))).scheduledAt,undefined,'snapshots exclude the old schedule');
   // A due schedule is picked up without a browser being open.
   const due=(await call('/api/runs',{mode:'builder',scenario:{steps:[{method:'GET',url:collection.item[0].request.url,expectedStatus:200}]},stages:'1:1',maxWorkers:1,scheduledAt:new Date(Date.now()+1200).toISOString()})).data;
   for(let i=0;i<80;i++){

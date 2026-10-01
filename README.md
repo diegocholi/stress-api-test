@@ -19,6 +19,14 @@ No editor, variáveis são escritas uma por linha (`BASE_URL=http://127.0.0.1:40
 
 A agenda e o histórico persistem em `.runs/`, ignorado pelo Git. O servidor precisa estar ligado para executar os agendamentos. Um teste roda por vez; agendamentos sobrepostos entram na fila. Ao reiniciar, testes interrompidos são marcados como falha e agendamentos pendentes voltam à fila. A interface permite cancelar e baixar o relatório XLSX ao terminar. Collections e environments de testes pendentes são armazenados localmente com permissões restritas e removidos do histórico ao encerrar. Não use o histórico para compartilhar credenciais.
 
+## Salvar e reutilizar testes
+
+Use **Salvar teste** no editor para guardar um cenário completo na biblioteca **Testes salvos**. A biblioteca permite buscar pelo nome, carregar, duplicar e excluir. Ao carregar, o formulário recupera as requisições, variáveis, headers, corpo, validações, estágios, limites e opções. Para Postman, recupera também a collection e o environment; não é preciso selecionar os arquivos novamente.
+
+**Salvar alterações** atualiza o teste carregado. **Salvar como novo** cria outro registro a partir da configuração do editor. A aplicação sinaliza alterações não salvas e detecta edições concorrentes em outras abas, impedindo sobrescritas silenciosas. **Novo teste** limpa o editor.
+
+Os testes ficam em `.runs/templates/`, em arquivos locais com permissões restritas, e continuam disponíveis após reiniciar o servidor. A definição inclui os valores configurados, como tokens e headers necessários à execução; esse diretório está fora do Git. Salvar ou carregar não executa requisições. A data de agendamento é definida a cada execução e não é reaplicada ao carregar um teste. Excluir um teste salvo preserva o histórico de execuções e os relatórios XLSX.
+
 ## Experimentar com uma API local
 
 Em um terminal:
@@ -46,6 +54,14 @@ node load-runner.js \
 ```
 
 O CLI imprime snapshots JSON e retorna código 0 somente quando o teste conclui e passa nos critérios. SIGINT/SIGTERM cancela e preserva métricas parciais. `--iters` foi removido: cada usuário repete a collection durante o estágio. Não há limite de iterações que esvazie a carga antes do tempo. Variáveis `VU_ID`, `VU_ITER`, `UNIQUE_ID` e `UNIQUE_EMAIL` estão disponíveis como dados da iteração.
+
+## Executar novamente
+
+O painel de resultados tem **Executar novamente** ao lado de **Baixar relatório XLSX**. Uma nova execução usa a configuração registrada no teste anterior, inicia imediatamente e cria um novo item no histórico com seu próprio relatório. O agendamento anterior não é reaplicado. A configuração original permanece disponível mesmo se o teste salvo for editado ou excluído.
+
+Execuções antigas que não registraram essa configuração mostram um seletor de testes salvos antes do botão. Nesse caso, escolha explicitamente o teste da biblioteca que deseja executar. A aplicação nunca tenta reconstruir requisições a partir do relatório.
+
+As configurações das execuções ficam em `.runs/inputs/`, em arquivos locais com permissões restritas, junto ao histórico. Incluem os dados necessários para repetir as requisições, como os testes salvos.
 
 ## Relatório final XLSX
 
