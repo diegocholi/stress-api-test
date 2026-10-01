@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {once} = require('node:events');
 const http = require('node:http');
+const Excel=require('exceljs');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function boot(dir) {
   const child=spawn(process.execPath,[path.join(__dirname,'../server.js')],{env:{...process.env,PORT:'0',STRESS_DATA_DIR:dir},stdio:['ignore','pipe','pipe']});
@@ -16,7 +17,7 @@ async function boot(dir) {
   });return {child,base};
 }
 async function stop(child) {if(child.exitCode!==null)return;const exited=once(child,'exit');child.kill('SIGTERM');await exited;}
-test('web API imports, schedules persist, cancels, executes and downloads exact CSV',async t=>{
+test('web API imports, schedules persist, cancels, executes and downloads final XLSX',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'stress-server-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   let app=await boot(dir);t.after(()=>stop(app.child));
   const call=async(route,body)=>{
@@ -39,18 +40,21 @@ test('web API imports, schedules persist, cancels, executes and downloads exact 
   assert.equal((await call('/api/runs',input)).response.status,409);
   for(let i=0;i<80;i++){
     jobs=(await call('/api/runs')).data;
-    if(jobs.find(j=>j.id===immediate.id)?.status==='completed')break;
+    if(jobs.find(j=>j.id===immediate.id)?.result?.reportStatus==='ready')break;
     await pause(100);
   }
   const result=jobs.find(j=>j.id===immediate.id);assert.equal(result.status,'completed',JSON.stringify(result));assert.equal(result.result.requests,received);assert.ok(received>0);
-  const csv=await fetch(`${app.base}/api/runs/${immediate.id}/csv`);assert.equal(csv.status,200);
-  assert.equal((await csv.text()).trim().split('\n').length-1,received);
+  const xlsx=await fetch(`${app.base}/api/runs/${immediate.id}/xlsx`);assert.equal(xlsx.status,200);
+  assert.match(xlsx.headers.get('content-type'),/spreadsheetml/);
+  const workbook=new Excel.Workbook();await workbook.xlsx.load(Buffer.from(await xlsx.arrayBuffer()));
+  assert.equal(workbook.getWorksheet('Requisições 1').rowCount-6,received);
+  assert.equal(workbook.getWorksheet('Resumo').getCell('A9').value,received);
   const stored=JSON.parse(fs.readFileSync(path.join(dir,`${immediate.id}.json`)));assert.equal(stored.config,undefined);
   // A due schedule is picked up without a browser being open.
   const due=(await call('/api/runs',{mode:'builder',scenario:{steps:[{method:'GET',url:collection.item[0].request.url,expectedStatus:200}]},stages:'1:1',maxWorkers:1,scheduledAt:new Date(Date.now()+1200).toISOString()})).data;
   for(let i=0;i<80;i++){
     const job=(await call('/api/runs')).data.find(j=>j.id===due.id);
-    if(job.status==='completed'){assert.ok(job.result.requests>0);return;}
+    if(job.status==='completed' && job.result.reportStatus==='ready'){assert.ok(job.result.requests>0);return;}
     await pause(100);
   }
   assert.fail('Scheduled run did not execute');

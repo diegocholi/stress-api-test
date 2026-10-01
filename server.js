@@ -4,6 +4,8 @@ const path = require('node:path');
 const {randomUUID} = require('node:crypto');
 const {Runner} = require('./lib/runner');
 const {validate} = require('./lib/config');
+const {generateReport}=require('./lib/report/run');
+const exportsInProgress=new Map();
 const ROOT = process.env.STRESS_DATA_DIR || path.join(__dirname, '.runs'); fs.mkdirSync(ROOT, {recursive: true, mode: 0o700});
 const jobs = new Map(); let current;
 const save = job => {
@@ -21,7 +23,7 @@ const view = job => ({id: job.id, name: job.name, status: job.status, scheduledA
 async function execute(job) {
   current = {job}; job.status = 'running'; save(job);
   try {
-    const runner = new Runner(job.config, path.join(ROOT, `${job.id}.csv`)); current.runner = runner;
+    const runner = new Runner({...job.config,name:job.name,source:job.source,reportContext:{id:job.id,createdAt:job.createdAt,scheduledAt:job.scheduledAt}}, path.join(ROOT, `${job.id}.xlsx`)); current.runner = runner;
     runner.on('snapshot', result => {job.result = result; job.status = result.status;});
     job.result = await runner.start(); job.status = job.result.status;
   } catch (err) {job.status = 'failed'; job.result = {status: 'failed', failure: err.message};}
@@ -49,12 +51,12 @@ const server = http.createServer(async (req,res) => {
       const input = await body(req); const config = validate(input);
       if (input.scheduledAt && (!Number.isFinite(Date.parse(input.scheduledAt)) || Date.parse(input.scheduledAt) <= Date.now())) throw new Error('Agende uma data futura');
       if (!input.scheduledAt && current) return json(res,409,{error:'Já existe um teste ativo. Aguarde ou agende outro.'});
-      const job = {id: randomUUID(), name: String(input.name || config.collection.info.name || 'Teste').slice(0,120), config,
+      const job = {id: randomUUID(), name: String(input.name || config.collection.info.name || 'Teste').slice(0,120), config,source:input.mode==='builder'?'Interface':'Postman',
         createdAt: new Date().toISOString(), scheduledAt: input.scheduledAt || new Date().toISOString(), status:'scheduled'};
       jobs.set(job.id,job); save(job); if (!input.scheduledAt) void execute(job);
       return json(res,201,view(job));
     }
-    const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|csv)$/);
+    const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|xlsx)$/);
     if (match) {
       const job = jobs.get(match[1]); if (!job) return json(res,404,{error:'Teste não encontrado'});
       if (match[2] === 'cancel' && req.method === 'POST') {
@@ -62,11 +64,21 @@ const server = http.createServer(async (req,res) => {
         else if (job.status === 'scheduled') {job.status = 'cancelled'; delete job.config; save(job);}
         return json(res,200,view(job));
       }
-      if (match[2] === 'csv' && req.method === 'GET') {
-        if (['running','stopping','scheduled'].includes(job.status)) return json(res,409,{error:'CSV disponível após o encerramento'});
-        const filename = path.join(ROOT,`${job.id}.csv`); if (!fs.existsSync(filename)) return json(res,404,{error:'Sem CSV'});
-        res.writeHead(200,{'Content-Type':'text/csv', 'Content-Disposition':`attachment; filename="${job.id}.csv"`});
-        fs.createReadStream(filename).on('error',()=>res.destroy()).pipe(res); return;
+      if (match[2] === 'xlsx' && req.method === 'GET') {
+        if (['running','stopping','scheduled'].includes(job.status) || job.result?.reportStatus==='generating') return json(res,409,{error:'Relatório XLSX disponível após o encerramento e a geração do arquivo'});
+        const filename=path.join(ROOT,`${job.id}.xlsx`), legacyFile=path.join(ROOT,`${job.id}.csv`);
+        if(!fs.existsSync(filename) && fs.existsSync(legacyFile)) {
+          if(!exportsInProgress.has(job.id)) {
+            const conversion=generateReport({output:filename,events:legacyFile,legacy:true,metadata:{name:job.name,source:'Versão anterior',result:job.result}})
+              .then(()=>{job.result={...job.result,reportStatus:'ready'};save(job);}).finally(()=>exportsInProgress.delete(job.id));
+            exportsInProgress.set(job.id,conversion);
+          }
+          await exportsInProgress.get(job.id);
+        }
+        if(!fs.existsSync(filename))return json(res,404,{error:job.result?.reportError || 'Esta execução não possui relatório XLSX'});
+        const name=job.name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]+/g,'-').slice(0,70) || 'teste';
+        res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="stress-lab-${name}-${job.id.slice(0,8)}.xlsx"`});
+        fs.createReadStream(filename).on('error',()=>res.destroy()).pipe(res);return;
       }
     }
     const files = {'/':'index.html','/app.js':'app.js','/style.css':'style.css'};

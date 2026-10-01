@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {Runner} = require('../lib/runner');
 const {validate} = require('../lib/config');
+const Excel=require('exceljs');
 function collection(url, scripts=[]) {return {info:{name:'Integration',schema:'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},item:[{name:'GET',request:{method:'GET',url},event:scripts}]};}
 async function target(t, handler) {
   const server=http.createServer(handler); await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -16,17 +17,21 @@ test('validates collections and bounded configuration',()=>{
   assert.throws(()=>validate({collection:collection('http://localhost'),stages:'1:20000'}),/Usuários/);
   assert.throws(()=>validate({collection:collection('http://localhost'),stages:'NaN:1'}),/Duração/);
 });
-test('sustains VUs, bounds workers, counts each real request once and flushes CSV',async t=>{
+test('sustains VUs, bounds workers, counts each real request once and generates detailed XLSX',async t=>{
   let received=0, late=0; const started=Date.now();
   const url=await target(t,(_req,res)=>{received++;if(Date.now()-started>2000)late++;setTimeout(()=>res.end('ok'),20);});
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'stress-test-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
-  const csv=path.join(dir,'requests.csv');
-  const runner=new Runner({collection:collection(url),stages:'3:3,1:1,1:0',maxWorkers:1,thresholds:{p95:500,errorRate:0}},csv);
+  const xlsx=path.join(dir,'requests.xlsx');
+  const runner=new Runner({collection:collection(url),stages:'3:3,1:1,1:0',maxWorkers:1,thresholds:{p95:500,errorRate:0}},xlsx);
   const promise=runner.start();assert.equal(runner.workers.length,1);
   const result=await promise;
   assert.equal(result.status,'completed',JSON.stringify(result));assert.ok(result.passed);assert.ok(late>3,'load continues after first iterations');
   assert.equal(result.requests,received);assert.equal(result.failedRequests,0);assert.equal(result.active,0);
-  assert.equal(fs.readFileSync(csv,'utf8').trim().split('\n').length-1,received);
+  assert.equal(result.reportStatus,'ready',result.reportError);
+  const workbook=new Excel.Workbook();await workbook.xlsx.readFile(xlsx);
+  assert.equal(workbook.getWorksheet('Requisições 1').rowCount-6,received);
+  assert.equal(workbook.getWorksheet('Resumo').getCell('A9').value,received);
+  assert.equal(fs.existsSync(xlsx+'.events.ndjson'),false);
   assert.ok(result.p95 < 500,'percentile contains only HTTP response times');
 });
 test('counts script HTTP requests, HTTP errors and failed assertions separately',async t=>{

@@ -76,7 +76,7 @@
           <div class="metrics" id="metrics"></div>
           <div class="chart-container"><div class="chart-title"><span><span class="legend-dot"></span>Usuários ativos</span><span id="chart-caption">Últimas 60 leituras</span></div><div class="chart-plot"><svg id="chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="Evolução dos usuários ativos"><defs><linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c0f780" stop-opacity=".18"/><stop offset="100%" stop-color="#c0f780" stop-opacity="0"/></linearGradient></defs><path id="chart-area" fill="url(#chart-gradient)"/><path id="chart-line" fill="none" stroke="#c0f780" stroke-width="2.5" vector-effect="non-scaling-stroke"/><circle id="chart-point" r="3.5" fill="#c0f780" hidden/></svg><span id="chart-empty">Aguardando dados da execução</span></div><div class="chart-axis"><span>Início da janela</span><span>Agora</span></div></div>
           <div id="verdict" class="verdict pending" role="status">Configure seu cenário e inicie um teste para acompanhar os resultados.</div>
-          <div class="actions"><button type="button" id="cancel" hidden>Parar / cancelar</button><a id="csv" hidden>Exportar CSV <span>↗</span></a></div>
+          <p id="report-message" class="help" role="status" hidden></p><div class="actions"><button type="button" id="cancel" hidden>Parar / cancelar</button><a id="xlsx" hidden>Baixar relatório XLSX <span>↗</span></a></div>
           <details class="diagnostics" id="diagnostics" hidden><summary>Detalhes da execução</summary><pre id="details"></pre></details>
         </div>
       </div>

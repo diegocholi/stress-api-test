@@ -171,8 +171,11 @@ function render(job) {
     job.status==='scheduled'?'Aguardando horário. Se houver um teste ativo, entrará na fila.':job.status==='cancelled'?'Execução cancelada. Resultados parciais.':'Coletando resultados. A aprovação é avaliada no encerramento.');
   $('verdict').className=`verdict ${s.failure || (job.status==='completed'&&!s.passed)?'error':job.status==='completed'?'success':'pending'}`;
   $('cancel').hidden=!['scheduled','running','stopping'].includes(job.status);
-  $('csv').hidden=!['completed','cancelled','failed'].includes(job.status) || !s.csvRows;
-  $('csv').href=`/api/runs/${job.id}/csv`;
+  $('xlsx').hidden=!['completed','cancelled','failed'].includes(job.status) || !(s.reportStatus==='ready' || (!s.reportStatus && s.csvRows));
+  $('report-message').hidden=!['generating','error'].includes(s.reportStatus) && !s.reportInfo;
+  $('report-message').textContent=s.reportStatus==='error'?`Não foi possível gerar o XLSX: ${s.reportError}`:s.reportStatus==='ready' && s.reportInfo?`${s.reportInfo.sheets} abas · ${s.reportInfo.charts} gráficos · ${s.reportInfo.rows.toLocaleString('pt-BR')} tentativas detalhadas · ${(s.reportInfo.bytes/1024).toFixed(0)} KB`:'Preparando seu relatório XLSX com gráficos e dados detalhados…';
+  $('report-message').classList.toggle('error',s.reportStatus==='error');
+  $('xlsx').href=`/api/runs/${job.id}/xlsx`;
   $('details').textContent=job.result ? `HTTP: ${Object.entries(s.codes||{}).map(([code,n])=>`${code}: ${n}`).join(' · ')}\nConexão: ${s.transportErrors||0} · Assertions: ${s.assertionFailures||0} · Scripts: ${s.scriptFailures||0} · Execuções: ${s.runFailures||0}\nMemória do gerador: ${Number(s.rssMB||0).toFixed(0)} MB · Atraso do event loop: ${Number(s.eventLoopLagMs||0).toFixed(0)} ms` : '';
 }
 $('cancel').onclick=async()=>{try{await api(`/api/runs/${selected}/cancel`,{});await refresh();}catch(e){$('message').textContent=e.message;}};

@@ -13,6 +13,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "newman": "^6.2.0"
+    "exceljs": "^4.4.0",
+    "newman": "^6.2.0",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
   }
 }
