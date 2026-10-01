@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const {validate} = require('../lib/config');
 const {Runner} = require('../lib/runner');
-const base = steps => ({mode:'builder',scenario:{variables:[],steps},stages:'2:1',timeout:5000,maxWorkers:1});
+const base = steps => ({mode:'builder',scenario:{variables:[],steps},stages:'2:1',timeout:5000,maxWorkers:1,evidence:{minResponses:1,minLoadPercent:0}});
 const step = {method:'GET',url:'http://127.0.0.1/health',expectedStatus:200};
 test('builder rejects invalid URLs, JSON, headers and validation paths',()=>{
   assert.throws(()=>validate(base([{...step,url:'file:///etc/passwd'}])),/URL HTTP/);
@@ -42,4 +42,17 @@ test('a response validation fails without injecting code from expected text',asy
   const server=http.createServer((_req,res)=>res.end('ok'));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const result=await new Runner(base([{...step,url:`http://127.0.0.1:${server.address().port}`,contains:"'); throw new Error('injected'); //"}])).start();
   assert.equal(result.status,'completed');assert.equal(result.failedRequests,0);assert.ok(result.assertionFailures>0);assert.equal(result.scriptFailures,0);assert.equal(result.passed,false);
+});
+
+test('builder validates variable availability in order and JSON template structure',()=>{
+  assert.throws(()=>validate(base([{...step,url:'{{MISSING}}/x'}])),/variável não definida/);
+  assert.throws(()=>validate(base([{...step,headers:[{key:'Authorization',value:'{{LATER}}'}]},{...step,extract:{path:'token',variable:'LATER'}}])),/variável não definida/);
+  assert.throws(()=>validate({...base([{...step,bodyType:'json',body:'{ invalid {{VALUE}}'}]),scenario:{variables:[{key:'VALUE',value:'1'}],steps:[{...step,bodyType:'json',body:'{ invalid {{VALUE}}'}]}}),/JSON inválido/);
+  assert.doesNotThrow(()=>validate(base([{...step,extract:{path:'id',variable:'ID'}},{...step,bodyType:'json',body:'{"id":{{ID}}}'}])));
+});
+test('JSON is validated after substitution and malformed runtime data is never sent',async t=>{
+  let received=0;const server=http.createServer((_req,res)=>{received++;res.end('ok');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const input=base([{method:'POST',url:`http://127.0.0.1:${server.address().port}`,bodyType:'json',body:'{"value":"{{VALUE}}"}'}]);
+  input.singleRun=true;input.scenario.variables=[{key:'VALUE',value:'unescaped"quote'}];
+  const result=await new Runner(input).start();assert.equal(received,0);assert.equal(result.requests,0);assert.ok(result.assertionFailures>0,JSON.stringify(result));assert.equal(result.passed,false);
 });

@@ -36,3 +36,14 @@ test('Postman files and environment are retained with scripts and values intact'
 test('invalid saved definitions are rejected without creating an entry',t=>{
   const {templates}=store(t);assert.throws(()=>templates.create({...builder,scenario:{steps:[]}}),/requisições/);assert.equal(templates.list().length,0);
 });
+
+test('separate timeouts and evidence persist through edits, copies and reloads',t=>{
+  const {templates,dir}=store(t);const input={...builder,scriptTimeout:2000,scenarioTimeout:0,drainTimeout:60000,evidence:{minResponses:120,minLoadPercent:95}};
+  const created=templates.create(input),copy=templates.duplicate(created.id),loaded=new TemplateStore(dir).get(copy.id).definition;
+  assert.equal(loaded.schemaVersion,2);assert.equal(loaded.scriptTimeout,2000);assert.equal(loaded.scenarioTimeout,0);assert.equal(loaded.drainTimeout,60000);assert.deepEqual(loaded.evidence,input.evidence);
+});
+test('unversioned saved tests keep their previous global timeout when loaded',t=>{
+  const {templates,dir}=store(t);const saved=templates.create(builder);const filename=path.join(dir,'templates',`${saved.id}.json`),old=JSON.parse(fs.readFileSync(filename));
+  for(const key of ['schemaVersion','scriptTimeout','scenarioTimeout','drainTimeout','evidence'])delete old.definition[key];fs.writeFileSync(filename,JSON.stringify(old));
+  const restored=new TemplateStore(dir).get(saved.id).definition;assert.equal(restored.scenarioTimeout,10000);assert.deepEqual(restored.evidence,{minResponses:1,minLoadPercent:0});
+});

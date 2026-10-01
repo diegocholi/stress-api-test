@@ -61,3 +61,16 @@ test('old CSV exports convert to XLSX with explicit missing-field information',a
   await buildReport(options);const w=new Excel.Workbook();await w.xlsx.readFile(options.output);
   assert.equal(w.getWorksheet('Resumo').getCell('A9').value,1);assert.equal(w.getWorksheet('Requisições 1').getCell('G7').value,'Não registrado (versão anterior)');
 });
+
+test('versioned reports identify missing validation records as partial even if HTTP counts match',async t=>{
+  const options=fixture(t);options.metadata.schemaVersion=2;options.metadata.methodologyVersion='2.0';options.metadata.config.evidence={minResponses:1,minLoadPercent:0};
+  options.metadata.result={...options.metadata.result,assertions:3};
+  const info=await buildReport(options);assert.equal(info.integrity,false);assert.equal(info.evaluation.verdict,'partial');
+  const w=new Excel.Workbook();await w.xlsx.readFile(options.output);assert.equal(w.getWorksheet('Resumo').getCell('A4').value,'RESULTADO PARCIAL');assert.ok(w.getWorksheet('Integridade').getSheetValues().some(row=>row?.includes('DIVERGE')));
+});
+
+test('a truncated event exports a partial workbook with an explicit integrity failure',async t=>{
+  const options=fixture(t);options.metadata.schemaVersion=2;options.metadata.config.evidence={minResponses:1,minLoadPercent:0};fs.appendFileSync(options.events,'{"type":"request"');
+  const result=await buildReport(options);assert.equal(result.invalidRecords,1);assert.equal(result.integrity,false);assert.equal(result.evaluation.verdict,'partial');
+  const w=new Excel.Workbook();await w.xlsx.readFile(options.output);assert.equal(w.getWorksheet('Resumo').getCell('A4').value,'RESULTADO PARCIAL');
+});

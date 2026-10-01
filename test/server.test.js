@@ -82,3 +82,33 @@ test('web API imports, schedules persist, cancels, executes and downloads final 
   }
   assert.fail('Scheduled run did not execute');
 });
+
+test('validation, one-shot checks, paginated history and series survive a server restart',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'stress-api-v2-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  let app=await boot(dir);t.after(()=>stop(app.child));let received=0;
+  const target=http.createServer((_req,res)=>{received++;res.end('{"ok":true}');});await new Promise(resolve=>target.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>target.close(resolve)));
+  const input={name:'Verificação única',mode:'builder',scenario:{steps:[{name:'Health',method:'GET',url:`http://127.0.0.1:${target.address().port}`,expectedStatus:200}]},stages:'1:1',maxWorkers:1};
+  const call=async(route,body)=>{const response=await fetch(app.base+route,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:response.status,data:await response.json()};};
+  assert.equal((await call('/api/validate',input)).data.valid,true);assert.equal(received,0);
+  const invalid=await call('/api/validate',{...input,scenario:{steps:[{method:'GET',url:'{{MISSING}}/x'}]}});assert.equal(invalid.status,400);assert.equal(invalid.data.step,0);assert.equal(invalid.data.field,'url');
+  const created=await call('/api/runs/check',input);assert.equal(created.status,201);const id=created.data.id;
+  let job;for(let i=0;i<100;i++){job=(await call(`/api/runs/${id}`)).data;if(job.result?.reportStatus==='ready')break;await pause(100);}
+  assert.equal(job.result.purpose,'check');assert.equal(job.result.requests,1);assert.equal(received,1);assert.equal(job.result.runs,1);assert.equal(job.result.passed,true,JSON.stringify(job));
+  const before=(await call(`/api/runs/${id}/series`)).data;assert.ok(before.points.length);assert.equal(before.points.reduce((n,p)=>n+p.requests,0),1);
+  await stop(app.child);app=await boot(dir);assert.deepEqual((await call(`/api/runs/${id}/series`)).data,before);assert.equal((await call(`/api/runs/${id}`)).data.result.passed,true);
+  const page=(await call('/api/runs?page=1&pageSize=1&q=única&status=approved')).data;assert.equal(page.total,1);assert.equal(page.items[0].id,id);assert.equal(page.overview.total,1);
+  assert.equal((await call('/api/runs?page=0')).status,400);assert.ok(Array.isArray((await call('/api/runs')).data));
+});
+test('failed XLSX generation can be retried from recorded events without new HTTP traffic',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'stress-regenerate-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const id='abcd-1234',output=path.join(dir,`${id}.xlsx`),startedAt=Date.now()-1000;
+  const result={status:'completed',requests:1,samples:1,elapsed:1,p95:10,errorRate:0,assertionFailures:0,scriptFailures:0,runFailures:0,passed:true,reportStatus:'error',reportError:'Falha de escrita',stages:[{stage:1,target:1,loadPercent:100}]};
+  const metadata={schemaVersion:2,methodologyVersion:'2.0',name:'Recuperável',startedAt,endedAt:startedAt+1000,config:{stages:[{durationSec:1,target:1}],thresholds:{p95:100,errorRate:0},evidence:{minResponses:1,minLoadPercent:90}},result};
+  fs.writeFileSync(`${output}.meta.json`,JSON.stringify(metadata));fs.writeFileSync(`${output}.events.ndjson`,JSON.stringify({type:'request',ts:startedAt+10,startedAt,stage:1,vu:1,iter:1,name:'Health',method:'GET',url:'http://127.0.0.1/never-called',code:200,latency:10,failed:false,transport:false})+'\n');
+  fs.writeFileSync(path.join(dir,`${id}.json`),JSON.stringify({id,name:'Recuperável',status:'completed',createdAt:new Date(startedAt).toISOString(),scheduledAt:new Date(startedAt).toISOString(),result}));
+  const app=await boot(dir);t.after(()=>stop(app.child));
+  const regenerate=()=>fetch(`${app.base}/api/runs/${id}/regenerate`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  const response=await regenerate();assert.equal(response.status,200);const restored=await response.json();assert.equal(restored.result.reportStatus,'ready');assert.equal(restored.result.passed,true);
+  assert.ok(fs.existsSync(output));assert.equal(fs.existsSync(`${output}.events.ndjson`),false);assert.equal((await regenerate()).status,409);
+  const w=new Excel.Workbook();await w.xlsx.readFile(output);assert.equal(w.getWorksheet('Resumo').getCell('A9').value,1);assert.equal(w.getWorksheet('Resumo').getCell('A4').value,'APROVADO');
+});

@@ -3,7 +3,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {randomUUID} = require('node:crypto');
 const {Runner} = require('./lib/runner');
-const {validate} = require('./lib/config');
+const {validate,legacyInput} = require('./lib/config');
+const {Timeline}=require('./lib/measurement');
+const {compare}=require('./lib/comparison');
+const {writeJson}=require('./lib/storage');
 const {generateReport}=require('./lib/report/run');
 const {TemplateStore,definition}=require('./lib/templates');
 const exportsInProgress=new Map();
@@ -18,19 +21,57 @@ const save = job => {
 for (const name of fs.readdirSync(ROOT).filter(n => /^[a-f0-9-]+\.json$/.test(n))) {
   try {
     const job = JSON.parse(fs.readFileSync(path.join(ROOT,name), 'utf8'));
-    if (['running','stopping'].includes(job.status)) {job.status = 'failed'; job.result = {...job.result, status: 'failed', failure: 'Servidor reiniciado durante o teste'}; delete job.config; save(job);}
+    if (['running','stopping'].includes(job.status)) {job.status = 'failed'; job.result = {...job.result, status: 'failed', recordIntegrity:false, passed:false, reportStatus:'error',reportError:'Execução interrompida; o registro disponível pode ser exportado como parcial.', failure: 'Servidor reiniciado durante o teste', ...(job.result?.evaluation?{evaluation:{...job.result.evaluation,verdict:'partial',provisional:false,reasons:['Servidor reiniciado durante o teste']}}:{})}; delete job.config; save(job);}
+    if (job.config) job.config=validate(legacyInput(job.config));
+    if(job.result?.reportStatus==='generating') {
+      job.result.reportStatus=fs.existsSync(path.join(ROOT,`${job.id}.xlsx`))?'ready':'error';
+      if(job.result.reportStatus==='error')job.result.reportError='Servidor reiniciado durante a geração; regenere o XLSX a partir dos registros.';
+      delete job.config;save(job);
+    }
     job.canRepeat=fs.existsSync(path.join(INPUTS,`${job.id}.json`));jobs.set(job.id, job);
   } catch (err) {console.error(`Histórico inválido: ${name}: ${err.message}`);}
 }
 const view = job => ({id: job.id, name: job.name, status: job.status, scheduledAt: job.scheduledAt, createdAt: job.createdAt, result: job.result, canRepeat: job.canRepeat===true, repeatedFrom:job.repeatedFrom});
+const outcome = job => job.result?.evaluation?.verdict || (job.status==='completed'?(job.result?.passed?'approved':'rejected'):['failed','cancelled'].includes(job.status)?'partial':'pending');
+const reportPath = id => path.join(ROOT,`${id}.xlsx`);
+function readJson(filename) {return fs.existsSync(filename)?JSON.parse(fs.readFileSync(filename,'utf8')):undefined;}
+async function series(job) {
+  if (current?.job.id===job.id && current.runner) return current.runner.series();
+  const stored=readJson(`${reportPath(job.id)}.timeline.json`);
+  if(stored)return stored;
+  const metadata=readJson(`${reportPath(job.id)}.meta.json`),events=`${reportPath(job.id)}.events.ndjson`;
+  if(!metadata || !fs.existsSync(events))return {schemaVersion:2,available:false,points:[],reason:'Evolução não registrada nesta versão.'};
+  const timeline=new Timeline(metadata.startedAt,metadata.timelineInterval || 1);
+  const lines=require('node:readline').createInterface({input:fs.createReadStream(events),crlfDelay:Infinity});
+  for await(const line of lines) {try{if(line.trim())timeline.observe(JSON.parse(line));}catch{/* A process crash may leave one incomplete trailing event. */}}
+  return {schemaVersion:2,methodologyVersion:metadata.methodologyVersion,points:timeline.points(job.result?.elapsed || metadata.result.elapsed)};
+}
+async function regenerate(job) {
+  if(['scheduled','running','stopping'].includes(job.status))throw Object.assign(new Error('Aguarde o encerramento do teste.'),{statusCode:409});
+  if(current && ['running','stopping'].includes(current.job.status))throw Object.assign(new Error('Aguarde a execução ativa para não interferir na medição.'),{statusCode:409});
+  if(exportsInProgress.has(job.id))return exportsInProgress.get(job.id);
+  const output=reportPath(job.id),events=`${output}.events.ndjson`,metadata=readJson(`${output}.meta.json`);
+  if(!metadata || !fs.existsSync(events))throw Object.assign(new Error('Registro original indisponível para regenerar este relatório.'),{statusCode:409});
+  job.result={...job.result,reportStatus:'generating',reportError:undefined};save(job);
+  const promise=generateReport({output,events,metadata:{...metadata,result:{...metadata.result,...job.result}}}).then(info=>{
+    job.result={...job.result,...info.metrics,reportStatus:'ready',reportInfo:info,evaluation:info.evaluation || job.result.evaluation,passed:info.evaluation?info.evaluation.verdict==='approved':job.result.passed};
+    if(info.integrity)fs.unlinkSync(events);
+    save(job);return view(job);
+  }).catch(err=>{job.result={...job.result,reportStatus:'error',reportError:err.message};save(job);throw err;}).finally(()=>exportsInProgress.delete(job.id));
+  exportsInProgress.set(job.id,promise);return promise;
+}
 async function execute(job) {
   const execution={job};current=execution;
   try {
     job.status='running';save(job);
     const runner=new Runner({...job.config,name:job.name,source:job.source,reportContext:{id:job.id,createdAt:job.createdAt,scheduledAt:job.scheduledAt,repeatedFrom:job.repeatedFrom}},path.join(ROOT,`${job.id}.xlsx`));execution.runner=runner;
-    runner.on('snapshot',result=>{job.result=result;job.status=result.status;});
+    runner.on('snapshot',result=>{
+      job.result=result;job.status=result.status;if(['completed','failed','cancelled'].includes(result.status))delete job.config;
+      try {save(job);if(result.status==='running' || result.status==='stopping')writeJson(`${reportPath(job.id)}.meta.json`,runner.metadata());}
+      catch(err){runner.failure=`Persistência da execução: ${err.message}`;runner.stop(true);}
+    });
     job.result=await runner.start();job.status=job.result.status;
-  } catch(err){job.status='failed';job.result={status:'failed',failure:err.message};}
+  } catch(err){job.status='failed';job.result={...job.result,status:'failed',passed:false,failure:err.message};}
   finally {
     delete job.config;
     try{save(job);}catch(err){console.error(`Falha ao salvar a execução ${job.id}: ${err.message}`);}
@@ -40,7 +81,7 @@ async function execute(job) {
 function launch(input,repeatedFrom) {
   const config=validate(input);
   if(input.scheduledAt && (!Number.isFinite(Date.parse(input.scheduledAt)) || Date.parse(input.scheduledAt)<=Date.now()))throw new Error('Agende uma data futura');
-  if(!input.scheduledAt && current)throw Object.assign(new Error('Já existe um teste ativo. Aguarde ou agende outro.'),{statusCode:409});
+  if(!input.scheduledAt && (current || exportsInProgress.size))throw Object.assign(new Error('Já existe um teste ativo ou relatório em geração. Aguarde ou agende outro.'),{statusCode:409});
   const job={id:randomUUID(),name:String(input.name || config.collection.info.name || 'Teste').slice(0,120),config,source:input.mode==='builder'?'Interface':'Postman',
     createdAt:new Date().toISOString(),scheduledAt:input.scheduledAt || new Date().toISOString(),status:'scheduled',canRepeat:true,...(repeatedFrom?{repeatedFrom}:{})};
   const filename=path.join(INPUTS,`${job.id}.json`),temporary=`${filename}.tmp`;
@@ -48,7 +89,7 @@ function launch(input,repeatedFrom) {
   save(job);jobs.set(job.id,job);if(!input.scheduledAt)void execute(job);return job;
 }
 const scheduler = setInterval(() => {
-  if (current) return;
+  if (current || exportsInProgress.size) return;
   const next = [...jobs.values()].filter(j => j.status === 'scheduled' && Date.parse(j.scheduledAt) <= Date.now()).sort((a,b) => Date.parse(a.scheduledAt)-Date.parse(b.scheduledAt))[0];
   if (next) void execute(next);
 }, 1000);
@@ -64,6 +105,18 @@ const server = http.createServer(async (req,res) => {
     // Local control surface: reject cross-origin mutation attempts.
     if (req.method === 'POST' && ((req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) || req.headers['content-type']?.split(';')[0] !== 'application/json')) return json(res,403,{error:'Origem ou tipo de conteúdo inválido'});
     const url = new URL(req.url, 'http://localhost');
+    if(url.pathname==='/api/validate' && req.method==='POST') {
+      const config=validate(await body(req));return json(res,200,{valid:true,schemaVersion:2,steps:require('./lib/templates').countRequests(config.collection.item),durationSec:config.stages.reduce((n,s)=>n+s.durationSec,0),evidence:config.evidence});
+    }
+    if(url.pathname==='/api/runs/check' && req.method==='POST') {
+      const input=await body(req);
+      return json(res,201,view(launch({...input,singleRun:true,scheduledAt:undefined,stages:[{durationSec:86400,target:1}],maxWorkers:1,evidence:{minResponses:1,minLoadPercent:0}})));
+    }
+    if(url.pathname==='/api/runs/compare' && req.method==='GET') {
+      const left=jobs.get(url.searchParams.get('left')),right=jobs.get(url.searchParams.get('right'));
+      if(!left || !right)return json(res,404,{error:'Selecione duas execuções registradas.'});
+      return json(res,200,compare(left,right,readJson(path.join(INPUTS,`${left.id}.json`)),readJson(path.join(INPUTS,`${right.id}.json`))));
+    }
     if(url.pathname==='/api/templates' && req.method==='GET')return json(res,200,templates.list());
     if(url.pathname==='/api/templates' && req.method==='POST')return json(res,201,templates.create(await body(req)));
     const templateRoute=url.pathname.match(/^\/api\/templates\/([a-f0-9-]+)(?:\/(duplicate|delete))?$/);
@@ -74,18 +127,31 @@ const server = http.createServer(async (req,res) => {
       if(action==='duplicate' && req.method==='POST')return json(res,201,templates.duplicate(id));
       if(action==='delete' && req.method==='POST'){templates.delete(id);return json(res,200,{deleted:true});}
     }
-    if (url.pathname === '/api/runs' && req.method === 'GET') return json(res,200,[...jobs.values()].reverse().map(view));
+    if (url.pathname === '/api/runs' && req.method === 'GET') {
+      const all=[...jobs.values()].reverse();
+      if(!url.searchParams.has('page'))return json(res,200,all.map(view));
+      const page=Number(url.searchParams.get('page')),pageSize=Number(url.searchParams.get('pageSize') || 20);
+      if(!Number.isInteger(page)||page<1||!Number.isInteger(pageSize)||pageSize<1||pageSize>100)return json(res,400,{error:'Paginação inválida.'});
+      const search=(url.searchParams.get('q') || '').toLocaleLowerCase('pt-BR'),status=url.searchParams.get('status');
+      const filtered=all.filter(j=>j.name.toLocaleLowerCase('pt-BR').includes(search) && (!status || j.status===status || outcome(j)===status));
+      return json(res,200,{schemaVersion:2,page,pageSize,total:filtered.length,overview:{total:all.length,completed:all.filter(j=>j.status==='completed').length,scheduled:all.filter(j=>j.status==='scheduled').length},items:filtered.slice((page-1)*pageSize,page*pageSize).map(job=>{const item=view(job);if(item.result)item.result={passed:item.result.passed,purpose:item.result.purpose,evaluation:item.result.evaluation?{verdict:item.result.evaluation.verdict}:undefined};return item;})});
+    }
     if (url.pathname === '/api/runs' && req.method === 'POST') {
       return json(res,201,view(launch(await body(req))));
     }
-    const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|xlsx|repeat)$/);
+    const detail=url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)$/);
+    if(detail && req.method==='GET') {const job=jobs.get(detail[1]);return job?json(res,200,view(job)):json(res,404,{error:'Teste não encontrado'});}
+    const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|xlsx|repeat|series|regenerate)$/);
     if (match) {
       const job = jobs.get(match[1]); if (!job) return json(res,404,{error:'Teste não encontrado'});
+      if(match[2]==='series' && req.method==='GET')return json(res,200,await series(job));
+      if(match[2]==='regenerate' && req.method==='POST')return json(res,200,await regenerate(job));
       if(match[2]==='repeat' && req.method==='POST') {
         if(!['completed','cancelled','failed'].includes(job.status))return json(res,409,{error:'Aguarde o teste terminar antes de repetir.'});
         const filename=path.join(INPUTS,`${job.id}.json`);
         if(!fs.existsSync(filename))return json(res,409,{error:'Esta execução antiga não registrou a configuração. Escolha um teste salvo para repetir.'});
-        return json(res,201,view(launch(JSON.parse(fs.readFileSync(filename,'utf8')),job.id)));
+        const input=legacyInput(JSON.parse(fs.readFileSync(filename,'utf8')));
+        return json(res,201,view(launch(job.result?.purpose==='check'?{...input,singleRun:true,stages:[{durationSec:86400,target:1}],maxWorkers:1,evidence:{minResponses:1,minLoadPercent:0}}:input,job.id)));
       }
       if (match[2] === 'cancel' && req.method === 'POST') {
         if (current?.job.id === job.id) current.runner?.stop();
@@ -96,6 +162,7 @@ const server = http.createServer(async (req,res) => {
         if (['running','stopping','scheduled'].includes(job.status) || job.result?.reportStatus==='generating') return json(res,409,{error:'Relatório XLSX disponível após o encerramento e a geração do arquivo'});
         const filename=path.join(ROOT,`${job.id}.xlsx`), legacyFile=path.join(ROOT,`${job.id}.csv`);
         if(!fs.existsSync(filename) && fs.existsSync(legacyFile)) {
+          if(current && ['running','stopping'].includes(current.job.status))return json(res,409,{error:'Aguarde a execução ativa antes de converter este relatório antigo.'});
           if(!exportsInProgress.has(job.id)) {
             const conversion=generateReport({output:filename,events:legacyFile,legacy:true,metadata:{name:job.name,source:'Versão anterior',result:job.result}})
               .then(()=>{job.result={...job.result,reportStatus:'ready'};save(job);}).finally(()=>exportsInProgress.delete(job.id));
@@ -116,7 +183,7 @@ const server = http.createServer(async (req,res) => {
       return fs.createReadStream(path.join(__dirname,'public',files[url.pathname])).pipe(res);
     }
     json(res,404,{error:'Não encontrado'});
-  } catch (err) {json(res,err.statusCode || 400,{error:err.message});}
+  } catch (err) {json(res,err.statusCode || 400,{error:err.message,step:err.step,field:err.field});}
 });
 server.listen(Number(process.env.PORT || 3000), '127.0.0.1', () => console.log(`Stress Lab: http://127.0.0.1:${server.address().port}`));
 async function shutdown() {clearInterval(scheduler); current?.runner?.stop(); server.close();}

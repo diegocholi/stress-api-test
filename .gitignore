@@ -121,3 +121,11 @@ postman/*
 
 # Local schedules, collections and results
 .runs/
+
+# Browser test artifacts
+/test-results/
+/playwright-report/
+*.xlsx.meta.json
+*.xlsx.timeline.json
+*.xlsx.meta.json.tmp
+*.xlsx.timeline.json.tmp
