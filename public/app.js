@@ -2,7 +2,9 @@ const $ = id => document.getElementById(id);
 const stages = $('stages'); let selected=sessionStorage.getItem('stress-selected') || undefined, runs = [], points = [];
 let selectedJob,historyPage=1,historySignature='',lastLibraryRefresh=0,seriesKey,refreshSequence=0;
 const comparisonOptions=new Map();
-let mode = 'builder';
+let workspaceBusy=false,submitPending=false,repeatPending=false;
+let mode = 'builder', editorSchema=3,seriesInterval,seriesPhases={};
+
 let loadedTemplate=null,templates=[],dirty=false,cachedCollection,cachedEnvironment,librarySignature='',editorBusy=false;
 function icon(name) {
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('icon');svg.setAttribute('aria-hidden','true');
@@ -11,34 +13,40 @@ function icon(name) {
 function updateLoadSummary() {
   const rows=[...stages.children];
   const duration=rows.reduce((total,row)=>total+(Number(row.children[0].value)||0),0);
-  const peak=Math.max(0,...rows.map(row=>Number(row.children[1].value)||0));
-  $('load-summary').textContent=`${duration}s · ATÉ ${peak} USUÁRIOS`;
+  const peak=Math.max(0,...rows.map(row=>Math.max(Number(row.children[1].value)||0,row.querySelector('[data-stage-profile]')?.value==='ramp'?Number(row.querySelector('[data-stage-from]')?.value)||0:0)));
+  $('load-summary').textContent=`${duration}s · ATÉ ${peak} ${$('load-model').value==='arrival'?'CENÁRIOS/S':'USUÁRIOS'}`;
   rows.forEach(row=>row.children[2].disabled=rows.length===1);
   $('add-stage').disabled=rows.length>=50;
-  const preview=$('load-preview'),svg=svgElement('svg',{viewBox:'0 0 640 175',role:'img','aria-label':`Carga em degraus: ${duration}s, até ${peak} usuários`});
+  const preview=$('load-preview'),svg=svgElement('svg',{viewBox:'0 0 640 175',role:'img','aria-label':`Perfil de carga: ${duration}s, até ${peak} ${$('load-model').value==='arrival'?'cenários/s':'usuários'}`});
   let elapsed=0,path='M 45 145';
-  for(const row of rows){const target=Number(row.children[1].value)||0,end=elapsed+(Number(row.children[0].value)||0),y=145-target/Math.max(1,peak)*120;
-    path+=` L ${45+elapsed/Math.max(1,duration)*570} ${y} L ${45+end/Math.max(1,duration)*570} ${y}`;elapsed=end;}
+  for(const row of rows){const ramp=row.querySelector('[data-stage-profile]')?.value==='ramp',from=Number(row.querySelector('[data-stage-from]')?.value)||0;const target=Number(row.children[1].value)||0,end=elapsed+(Number(row.children[0].value)||0),y=145-target/Math.max(1,peak)*120;
+    path+=` L ${45+elapsed/Math.max(1,duration)*570} ${ramp?145-from/Math.max(1,peak)*120:y} L ${45+end/Math.max(1,duration)*570} ${y}`;elapsed=end;}
   svg.append(svgElement('path',{d:path+' L 615 145 L 45 145 Z',fill:'#c0f78022'}),svgElement('path',{d:path,fill:'none',stroke:'#c0f780','stroke-width':3}));
-  for(const [x,y,text]of [[45,169,'0s'],[550,169,`${duration}s`],[45,15,`${peak} usuários`]]){const label=svgElement('text',{x,y,fill:'#c0cad7','font-size':13});label.textContent=text;svg.append(label);}preview.replaceChildren(svg);
+  for(const [x,y,text]of [[45,169,'0s'],[550,169,`${duration}s`],[45,15,`${peak} ${$('load-model').value==='arrival'?'cenários/s':'usuários'}`]]){const label=svgElement('text',{x,y,fill:'#c0cad7','font-size':13});label.textContent=text;svg.append(label);}preview.replaceChildren(svg);
 }
 stages.addEventListener('input',updateLoadSummary);
 function updateNavigation() {
   const hash=location.hash || '#configure';
-  document.body.dataset.view=hash==='#configure'?'configure':hash==='#monitor'?'monitor':'results';
+  document.body.dataset.view=hash==='#configure'?'configure':hash==='#monitor'?'monitor':hash==='#saved-panel'?'library':hash==='#history-panel'?'history':'results';
   document.querySelectorAll('.view-tabs a').forEach(link=>{const active=link.hash===(document.body.dataset.view==='results'?'#results-panel':hash);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
   document.querySelectorAll('.nav-link').forEach(link=>{const active=link.getAttribute('href')===hash;link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');});
 }
 window.addEventListener('hashchange',updateNavigation);updateNavigation();
 const labels = {scheduled:'Agendado',running:'Executando',stopping:'Encerrando',completed:'Concluído',failed:'Falhou',cancelled:'Cancelado'};
 const verdictLabels={approved:'Aprovado',rejected:'Reprovado',inconclusive:'Inconclusivo',partial:'Resultado parcial',pending:'Provisório'};
-function addStage(duration=30,target=10) {
+function addStage(duration=30,target=10,ramp=false,from=0) {
   const row = document.createElement('div'); row.className='stage';
   row.innerHTML='<input type="number" min="1" max="86400" required aria-label="Duração do estágio em segundos"><input type="number" min="0" max="500" required aria-label="Usuários do estágio"><button type="button" aria-label="Remover estágio">×</button>';
   row.children[0].value=duration; row.children[1].value=target;
-  row.children[2].onclick=()=>{if(stages.children.length>1) row.remove();updateLoadSummary();markDirty();}; stages.append(row);updateLoadSummary();
+  row.children[2].onclick=()=>{if(stages.children.length>1) row.remove();updateLoadSummary();markDirty();};
+  const profile=document.createElement('select');profile.dataset.stageProfile='';profile.setAttribute('aria-label','Perfil do estágio');for(const [value,label]of [['step','Degrau'],['ramp','Rampa']]){const option=document.createElement('option');option.value=value;option.textContent=label;profile.append(option);}profile.value=ramp?'ramp':'step';
+  const initial=document.createElement('input');initial.type='number';initial.min=0;initial.max=500;initial.value=from;initial.dataset.stageFrom='';initial.setAttribute('aria-label','Alvo inicial da rampa');initial.hidden=!ramp;profile.onchange=()=>{initial.hidden=profile.value!=='ramp';updateLoadSummary();markDirty();};row.append(profile,initial);
+  stages.append(row);updateLoadSummary();
 }
 addStage(); addStage(60,20);
+function updateModel(){const arrival=$('load-model').value==='arrival';$('model-help').textContent=arrival?'Taxa de cenários/s independente da duração da API. Um cenário de uma requisição corresponde ao RPS planejado. Chegadas atrasadas ou sem capacidade são descartadas e registradas.':'Usuários repetem o cenário. Se a API fica lenta, a taxa de novas operações diminui.';$('form').elements.thinkTime.disabled=arrival;document.querySelector('.stage-heading').children[1].textContent=arrival?'Cenários por segundo':'Usuários alvo';for(const row of stages.children)row.children[1].setAttribute('aria-label',arrival?'Cenários por segundo do estágio':'Usuários do estágio');updateLoadSummary();}
+$('load-model').onchange=updateModel;updateModel();
+$('load-preset').onchange=()=>{const profiles={constant:[[60,10]],stress:[[30,10,true,1],[60,30,true,10],[30,50,true,30]],spike:[[30,5],[10,50],[30,5]],soak:[[3600,10]]};const profile=profiles[$('load-preset').value];if(profile){stages.replaceChildren();profile.forEach(args=>addStage(...args));markDirty();}};
 $('add-stage').onclick=()=>{if(stages.children.length<50){addStage();markDirty();}};
 
 function setMode(next) {
@@ -92,6 +100,7 @@ function addRequest(step={}) {
       <small>O caminho usa pontos, como items.0.id. O valor precisa ser JSON válido.</small>
       <div class="pair"><label>Extrair campo JSON<input data-field="extractPath" placeholder="data.token"></label><label>Salvar na variável<input data-field="extractVariable" placeholder="TOKEN"></label></div>
       <small>Nas próximas requisições, use {{TOKEN}} para o valor extraído.</small>
+      <div class="pair"><label>p95 máximo deste endpoint (ms)<input data-field="p95Limit" type="number" min="1" max="600000" placeholder="Opcional"></label><label>Amostra mínima do endpoint<input data-field="endpointSamples" type="number" min="1" value="100"></label></div><small>Critério opcional. Use nomes únicos para os endpoints avaliados.</small>
     </details></div>`;
   row.dataset.method='GET';
   row.querySelector('[data-field="method"]').onchange=event=>{row.dataset.method=event.target.value;row.querySelector('.method-badge').textContent=event.target.value;};
@@ -109,7 +118,7 @@ function addRequest(step={}) {
     updateRequests();markDirty();
   });
   const field=(name,value)=>{row.querySelector(`[data-field="${name}"]`).value=value ?? '';};
-  for(const name of ['name','url','body','contains'])if(step[name]!==undefined)field(name,step[name]);
+  for(const name of ['name','url','body','contains','p95Limit','endpointSamples'])if(step[name]!==undefined)field(name,step[name]);
   if(step.method)field('method',step.method);if(step.bodyType)field('bodyType',step.bodyType);
   if(step.expectedStatus!==undefined)field('expectedStatus',step.expectedStatus);
   if(step.headers)field('headers',step.headers.map(h=>`${h.key}: ${h.value}`).join('\n'));
@@ -130,7 +139,7 @@ function readStep(row,index) {
   const value=field=>row.querySelector(`[data-field="${field}"]`).value;
   const problem=(message,field)=>{throw Object.assign(new Error(`Requisição ${index+1}: ${message}`),{step:index,field});};
   let headers;try{headers=pairs(value('headers'),':','Headers');}catch(e){problem(e.message,'headers');}
-  const step={name:value('name'),method:value('method'),url:value('url').trim(),headers,bodyType:value('bodyType'),body:value('body'),expectedStatus:value('expectedStatus'),contains:value('contains')};
+  const step={name:value('name'),method:value('method'),url:value('url').trim(),headers,bodyType:value('bodyType'),body:value('body'),expectedStatus:value('expectedStatus'),contains:value('contains'),p95Limit:value('p95Limit'),endpointSamples:value('endpointSamples')};
   if(value('jsonPath')||value('jsonValue')) {
     if(!value('jsonPath')||!value('jsonValue'))problem('informe o campo e o valor JSON esperado.','jsonValue');
     try {step.jsonCheck={path:value('jsonPath').trim(),value:JSON.parse(value('jsonValue'))};}
@@ -185,22 +194,24 @@ $('form').addEventListener('invalid',event=>{
   showError(Object.assign(new Error(event.target.validationMessage || 'Preencha este campo.'),{step,field:event.target.dataset.field || event.target.name || event.target.id}));
 },true);
 $('form').onsubmit=async event=>{
-  event.preventDefault();clearErrors(); $('submit').disabled=true; $('message').textContent='Preparando teste…'; $('message').className='';
+  event.preventDefault();clearErrors(); submitPending=true;$('submit').disabled=true; $('message').textContent='Preparando teste…'; $('message').className='';
   updateLoadSummary();
   try {
     const input=await collectInput(true);
     const job=await api('/api/runs',input); selectRun(job.id);location.hash='#monitor';
     $('message').textContent=input.scheduledAt?'Teste agendado. Mantenha o servidor aberto para executar.':'Teste iniciado.'; await refresh();
   }catch(e){showError(e);}
-  finally{$('submit').disabled=false;}
+  finally{submitPending=false;executionAvailability();}
 };
 
+function endpointRules(){return $('endpoint-rules').value.split(/\r?\n/).filter(line=>line.trim()).map(line=>{const parts=line.split('|'),minResponses=Number(parts.pop()),p95=Number(parts.pop()),name=parts.join('|').trim();if(!name || !Number.isInteger(p95)||p95<1 || !Number.isInteger(minResponses)||minResponses<1)throw Object.assign(new Error('Critério por endpoint: use Nome | p95 em ms | amostra mínima.'),{field:'endpointRules'});return {name,p95,minResponses};});}
 async function collectInput(includeSchedule=false) {
   const form=$('form').elements;
   const source=mode==='builder'?{scenario:readScenario()}:{collection:$('collection').files.length?await readFile('collection',true):cachedCollection,environment:$('environment').files.length?await readFile('environment'):cachedEnvironment};
   if(mode==='postman' && !source.collection)throw new Error('Selecione uma collection');
-  const input={schemaVersion:2,name:form.name.value,mode,...source,
-    stages:[...stages.children].map(row=>({durationSec:Number(row.children[0].value),target:Number(row.children[1].value)})),
+  const input={schemaVersion:editorSchema,name:form.name.value,mode,...source,
+    stages:[...stages.children].map(row=>({durationSec:Number(row.children[0].value),target:Number(row.children[1].value),...(row.querySelector('[data-stage-profile]').value==='ramp'?{ramp:true,fromTarget:Number(row.querySelector('[data-stage-from]').value)}:{})})),
+    loadModel:form.loadModel.value,warmupSec:Number(form.warmupSec.value),maxConcurrent:Number(form.maxConcurrent.value),generatorLagLimitMs:Number(form.generatorLagLimitMs.value),endpointThresholds:mode==='postman'?endpointRules():[...$('requests').children].flatMap((row,i)=>{const p=row.querySelector('[data-field=p95Limit]').value;return mode==='builder' && p?[{name:row.querySelector('[data-field=name]').value || `Requisição ${i+1}`,p95:Number(p),minResponses:Number(row.querySelector('[data-field=endpointSamples]').value)}]:[]}),
     maxWorkers:Number(form.maxWorkers.value),timeout:Number(form.timeout.value),scriptTimeout:Number(form.scriptTimeout.value),scenarioTimeout:Number(form.scenarioTimeout.value),drainTimeout:Number(form.drainTimeout.value),evidence:{minResponses:Number(form.minResponses.value),minLoadPercent:Number(form.minLoadPercent.value)},thinkTime:Number(form.thinkTime.value),
     keepAlive:form.keepAlive.checked,bail:form.bail.checked,insecure:form.insecure.checked,
     thresholds:{p95:Number(form.p95.value),errorRate:Number(form.errorRate.value)}};
@@ -208,6 +219,8 @@ async function collectInput(includeSchedule=false) {
   return input;
 }
 function editorState() {
+  $('methodology-note').textContent=editorSchema>=3?'Metodologia 3.0: avaliação global e por estágio.':'Metodologia 2.0 preservada: avaliação global. Atualize explicitamente para aplicar os critérios por estágio.';
+  $('upgrade-methodology').hidden=editorSchema>=3;
   $('editor-status').textContent=dirty?'NÃO SALVO':loadedTemplate?'SALVO':'NOVO';
   $('editor-status').className=`badge ${dirty?'scheduled':loadedTemplate?'completed':'neutral'}`;
   $('editing-note').hidden=!loadedTemplate;
@@ -217,8 +230,9 @@ function editorState() {
 }
 function markDirty(event) {if(event?.target?.name==='scheduledAt' || event?.target?.id==='execution-time')return;dirty=true;editorState();}
 $('form').addEventListener('input',markDirty);$('form').addEventListener('change',markDirty);
+function executionAvailability(){const immediate=$('execution-time').value==='now';$('submit').disabled=submitPending || editorBusy || (immediate&&workspaceBusy);$('check-once').disabled=editorBusy || workspaceBusy;$('execution-availability').textContent=workspaceBusy?'Há uma execução ou relatório em andamento. Você pode editar, salvar ou agendar outro teste.':'';}
 function setEditorBusy(value) {
-  editorBusy=value;$('form').inert=value;$('new-test').disabled=value;$('save-test').disabled=value;$('save-copy').disabled=value;renderLibrary();
+  editorBusy=value;executionAvailability();$('form').inert=value;$('new-test').disabled=value;$('save-test').disabled=value;$('save-copy').disabled=value;renderLibrary();
 }
 function canReplace() {if(editorBusy){libraryMessage('Aguarde a operação atual terminar.');return false;}return !dirty || window.confirm('Há alterações não salvas. Deseja substituí-las?');}
 function resetEditor() {
@@ -226,9 +240,10 @@ function resetEditor() {
   $('collection').required=true;$('collection-name').textContent='Selecione uma collection com requisições.';
   $('environment-name').textContent='';$('clear-environment').hidden=true;
   $('requests').replaceChildren();addRequest();stages.replaceChildren();addStage();addStage(60,20);setMode('builder');
-  dirty=false;editorState();$('message').textContent='';renderLibrary();
+  editorSchema=3;dirty=false;editorState();$('message').textContent='';renderLibrary();updateModel();
 }
 function newTest() {if(!canReplace())return;resetEditor();location.hash='#configure';$('form').elements.name.focus();}
+$('upgrade-methodology').onclick=()=>{editorSchema=3;markDirty();};
 $('new-test').onclick=newTest;$('detach-template').onclick=newTest;
 $('clear-environment').onclick=()=>{cachedEnvironment=undefined;$('environment').value='';$('environment-name').textContent='';$('clear-environment').hidden=true;markDirty();};
 async function loadTemplate(id) {
@@ -237,15 +252,18 @@ async function loadTemplate(id) {
   try {
     const item=await api(`/api/templates/${id}`),d=item.definition;
     resetEditor();const form=$('form').elements;
+    editorSchema=d.schemaVersion || 2;
     for(const name of ['name','maxWorkers','timeout','scriptTimeout','scenarioTimeout','drainTimeout','thinkTime'])form[name].value=d[name];
     for(const name of ['keepAlive','bail','insecure'])form[name].checked=d[name];
     form.p95.value=d.thresholds.p95;form.errorRate.value=d.thresholds.errorRate;form.minResponses.value=d.evidence?.minResponses ?? 1;form.minLoadPercent.value=d.evidence?.minLoadPercent ?? 0;
-    stages.replaceChildren();d.stages.forEach(stage=>addStage(stage.durationSec,stage.target));
+    stages.replaceChildren();d.stages.forEach(stage=>addStage(stage.durationSec,stage.target,stage.ramp,stage.fromTarget));
+    form.generatorLagLimitMs.value=d.generatorLagLimitMs ?? 100;form.loadModel.value=d.loadModel || 'users';form.warmupSec.value=d.warmupSec || 0;form.maxConcurrent.value=d.maxConcurrent || 500;updateModel();
     if(d.mode==='builder') {
-      $('requests').replaceChildren();d.scenario.steps.forEach(addRequest);
+      $('requests').replaceChildren();d.scenario.steps.forEach(step=>addRequest(step));
+      [...$('requests').children].forEach((row,i)=>{const rule=d.endpointThresholds?.find(r=>r.name===(d.scenario.steps[i].name || `Requisição ${i+1}`));if(rule){row.querySelector('[data-field=p95Limit]').value=rule.p95;row.querySelector('[data-field=endpointSamples]').value=rule.minResponses;}});
       $('variables').value=(d.scenario.variables || []).map(v=>`${v.key}=${v.value}`).join('\n');
     } else {
-      cachedCollection=d.collection;cachedEnvironment=d.environment;
+      cachedCollection=d.collection;cachedEnvironment=d.environment;$('endpoint-rules').value=(d.endpointThresholds || []).map(r=>`${r.name} | ${r.p95} | ${r.minResponses}`).join('\n');
       $('collection').required=false;$('collection-name').textContent=`Carregada: ${d.collection.info.name || d.name}. Selecione um arquivo para substituir.`;
       $('environment-name').textContent=d.environment?`Carregado: ${d.environment.name || 'Environment salvo'}`:'';
       $('clear-environment').hidden=!d.environment;
@@ -293,7 +311,7 @@ function renderLibrary() {
     const card=document.createElement('div');card.className='saved-item';card.dataset.selected=String(item.id===loadedTemplate?.id);
     const title=document.createElement('div');title.className='saved-title';const name=document.createElement('strong');name.textContent=item.name;
     const badge=document.createElement('span');badge.className='badge neutral';badge.textContent=item.mode==='builder'?'INTERFACE':'POSTMAN';title.append(name,badge);
-    const meta=document.createElement('span');meta.className='saved-meta';meta.textContent=`${item.steps} requisições · ${item.durationSec}s · até ${item.peakUsers} usuários · atualizado em ${new Date(item.updatedAt).toLocaleString('pt-BR')}`;
+    const meta=document.createElement('span');meta.className='saved-meta';meta.textContent=`${item.steps} requisições · ${item.durationSec}s · até ${item.peakUsers} ${item.loadModel==='arrival'?'cenários/s':'usuários'} · atualizado em ${new Date(item.updatedAt).toLocaleString('pt-BR')}`;
     const actions=document.createElement('div');actions.className='saved-actions';
     for(const [label,cls,action]of [['Carregar','load-template',()=>loadTemplate(item.id)],['Duplicar','duplicate-template',()=>duplicateTemplate(item.id)],['Excluir','delete-template',()=>deleteTemplate(item)]]){
       const button=document.createElement('button');button.type='button';button.className=cls;button.textContent=label;button.disabled=editorBusy;button.setAttribute('aria-label',`${label} ${item.name}`);button.onclick=action;actions.append(button);
@@ -307,8 +325,17 @@ $('saved-search').oninput=renderLibrary;
 editorState();
 
 function renderMetrics(s={}) {
-  const metrics=[['Requisições',s.requests ?? 0,'Tentativas HTTP'],['RPS',Number(s.rps || 0).toFixed(1),'Média da execução'],['Usuários',`${s.active || 0} / ${s.target || 0}`,'Alocados / alvo'],['p95',s.p95 == null?'—':`${s.p95} ms`,`${number(s.samples,0)} respostas com latência`],['p99',s.p99 == null?'—':`${s.p99} ms`,'99% das respostas'],['Falhas',`${Number(s.errorRate || 0).toFixed(2)}%`,'HTTP ≥400 ou conexão']];
-  $('metrics').replaceChildren(...metrics.map(([label,value,help])=>{const el=document.createElement('div');el.className='metric';for(const [tag,text]of [['span',label],['strong',value],['small',help]]){const child=document.createElement(tag);child.textContent=text;if(tag==='span')child.append(icon(label==='Usuários'?'users':label==='Falhas'?'shield':label==='Requisições'?'code':label==='RPS'?'pulse':'clock'));el.append(child);}return el;}));
+  const recent=s.throughput?.recent, average=s.throughput?.average5, elapsed=s.elapsed || 0;
+  const rate=(key,total)=>recent ? number(recent[key],1) : s.throughput ? (['completed','failed','cancelled'].includes(s.status)?'Sem janela':'Coletando') : '—';
+  const note=(key,total)=>`Últimos 5s: ${average?number(average[key],1):'—'} · média global: ${number(elapsed?total/elapsed:0,1)}/s`;
+  const metrics=[['Tentativas/s',rate('requests',s.requests),note('requests',s.requests || 0)],['Sucessos HTTP/s',rate('successes'),note('successes',(s.requests || 0)-(s.failedRequests || 0))],['Cenários/s',rate('scenarios'),note('scenarios',s.runs || 0)],['Usuários',s.loadModel==='arrival'?`${s.active || 0}`:`${s.active || 0} / ${number(s.target || 0,1)}`,s.loadModel==='arrival'?`Alocados · taxa alvo ${number(s.target,1)} cenários/s`:'Alocados / alvo'],['p95',(s.performance || s).p95 == null?'—':`${(s.performance || s).p95} ms`,`${number(s.performance?.samples ?? s.samples,0)} respostas avaliadas`],['Falhas',`${number(s.performance?.errorRate ?? s.errorRate ?? 0)}%`,'HTTP ≥400 ou conexão; validações separadas']];
+  $('metrics').replaceChildren(...metrics.map(([label,value,help])=>{const el=document.createElement('div');el.className='metric';for(const [tag,text]of [['span',label],['strong',value],['small',help]]){const child=document.createElement(tag);child.textContent=text;el.append(child);}return el;}));
+  const running=['running','stopping'].includes(s.status), stale=running && s.updatedAt && Date.now()-s.updatedAt>3000;
+  $('throughput-status').textContent=`${stale?'Dados desatualizados · ':''}${s.throughput?(running?'Janela completa de 1s, aguardando lotes dos workers.':'Última janela completa de 1s; medição encerrada.'):'Throughput recente não registrado nesta versão.'} ${s.updatedAt?`Atualizado às ${new Date(s.updatedAt).toLocaleTimeString('pt-BR')}.`:''}`;
+  const current=s.stages?.find(stage=>stage.stage===s.stage),coverage=current?.loadPercent;
+  $('generator-status').textContent=`${s.generatorHealth?.overloaded?'Gerador sobrecarregado · ':''}${['completed','failed','cancelled'].includes(s.status)?'Encerrado':({warmup:'Aquecimento',load:'Carga',drain:'Drenagem'})[s.phase] || 'Execução'} · ${number(s.busy || 0,0)} cenários em execução · ${number(s.paused || 0,0)} usuários em pausa · ${number(s.inFlight || 0,0)} requisições em andamento · cumprimento ${number(coverage)}%${current?.droppedArrivals?` · ${current.droppedArrivals} chegadas descartadas`:''}`;
+  $('generator-telemetry').textContent=`Gerador: CPU ${number(s.cpuPercent)}% (100% = 1 núcleo) · memória ${number(s.rssMB)} MB · event loop ${number(s.eventLoopLagMs)} ms · workers ${number(s.workerEventLoopLagMs)} ms. Carga insuficiente torna a avaliação inconclusiva; CPU isolada não reprova a API.`;
+  $('load-progress').value=coverage || 0;
 }
 renderMetrics();
 function repeatSources(job) {
@@ -322,7 +349,7 @@ function repeatSources(job) {
 }
 $('repeat').onclick=async()=>{
   const job=selectedJob;if(!job)return;
-  $('repeat').disabled=true;$('repeat-message').hidden=true;
+  repeatPending=true;$('repeat').disabled=true;$('repeat-message').hidden=true;
   try {
     let next;
     if(job.canRepeat)next=await api(`/api/runs/${job.id}/repeat`,{});
@@ -335,10 +362,10 @@ $('repeat').onclick=async()=>{
     selectRun(next.id);location.hash='#monitor';$('message').className='';$('message').textContent='Nova execução iniciada. O relatório anterior continua no histórico.';
     await refresh();
   }catch(error){$('message').className='error';$('message').textContent=error.message;$('repeat-message').hidden=false;$('repeat-message').textContent=error.message;$('repeat-message').dataset.run=job.id;}
-  finally{$('repeat').disabled=false;}
+  finally{repeatPending=false;$('repeat').disabled=workspaceBusy;}
 };
 function scheduleMode() {
-  const scheduled=$('execution-time').value==='schedule';
+  const scheduled=$('execution-time').value==='schedule';executionAvailability();
   $('schedule-field').hidden=!scheduled;
   $('form').elements.scheduledAt.disabled=!scheduled;
   $('form').elements.scheduledAt.required=scheduled;
@@ -359,7 +386,7 @@ async function preflight(once) {
 }
 $('validate-config').onclick=()=>preflight(false);$('check-once').onclick=()=>preflight(true);
 function selectRun(id) {
-  selected=id;sessionStorage.setItem('stress-selected',id);selectedJob=undefined;seriesKey=undefined;points=[];
+  selected=id;sessionStorage.setItem('stress-selected',id);selectedJob=undefined;seriesKey=undefined;points=[];seriesPhases={};seriesInterval=undefined;
   $('comparison-note').textContent='';$('comparison-output').replaceChildren();
   renderCharts([]);historySignature='';
 }
@@ -373,19 +400,20 @@ function verdict(job) {
   return job.result?.evaluation?.verdict || (job.status==='completed'?(job.result?.passed?'approved':'rejected'):['failed','cancelled'].includes(job.status)?'partial':'pending');
 }
 function render(job) {
-  selectedJob=job;
+  selectedJob=job;$('monitor').dataset.runId=job.id;
   const s=job.result || {},finished=['completed','cancelled','failed'].includes(job.status),outcome=verdict(job);
   if($('repeat-message').dataset.run!==job.id)$('repeat-message').hidden=true;
-  $('repeat').hidden=!finished;$('repeat-source').hidden=!finished || job.canRepeat;
+  $('repeat').hidden=!finished;$('repeat').disabled=repeatPending || workspaceBusy || s.reportStatus==='generating';$('repeat-source').hidden=!finished || job.canRepeat;
   if(finished&&!job.canRepeat)repeatSources(job);
   $('status').textContent=finished?verdictLabels[outcome]:labels[job.status] || job.status;
+  if(finished && s.purpose==='check' && s.schemaVersion>=3)$('status').textContent=outcome==='approved'?'Fluxo aprovado':verdictLabels[outcome];
   const statusClass=outcome==='approved'?'completed':outcome==='rejected'?'failed':finished?'scheduled':['running','stopping'].includes(job.status)?'running':'neutral';
   $('status').className=`badge ${statusClass}`;
   $('run-name').textContent=job.name;
   $('run-info').textContent=`${new Date(job.scheduledAt).toLocaleString('pt-BR')} · ${s.purpose==='check'?'Verificação funcional':`Estágio ${s.stage || 0}`} · ${number(s.elapsed || 0)} segundos`;
   renderMetrics(s);
   const reasons=s.evaluation?.reasons || [];
-  const text=s.failure || (finished?`${verdictLabels[outcome]}. ${reasons.length?reasons.join(' · '):outcome==='approved'?'Cumpriu os critérios configurados.':'Resultados parciais.'}`:job.status==='scheduled'?'Aguardando horário. Agendamentos sobrepostos entram na fila.':'Coletando resultados. Critérios provisórios até o encerramento.');
+  const text=s.failure || (finished?`${s.purpose==='check'&&s.schemaVersion>=3&&outcome==='approved'?'Fluxo aprovado':verdictLabels[outcome]}. ${reasons.length?reasons.join(' · '):outcome==='approved'?'Cumpriu os critérios configurados.':'Resultados parciais.'}`:job.status==='scheduled'?'Aguardando horário. Agendamentos sobrepostos entram na fila.':'Coletando resultados. Critérios provisórios até o encerramento.');
   $('verdict').textContent=text;$('verdict').className=`verdict ${outcome==='approved'?'success':outcome==='rejected'?'error':'pending'}`;
   $('cancel').hidden=!['scheduled','running','stopping'].includes(job.status);
   const ready=finished && (s.reportStatus==='ready' || (!s.reportStatus && s.csvRows));
@@ -397,15 +425,17 @@ function render(job) {
   $('diagnostics').hidden=!job.result;
   $('details').textContent=`HTTP: ${Object.entries(s.codes||{}).map(([code,n])=>`${code}: ${n}`).join(' · ')}\nConexão: ${s.transportErrors||0} · Validações: ${s.assertionFailures||0} · Scripts: ${s.scriptFailures||0} · Execuções: ${s.runFailures||0}\nAlocados: ${s.active||0} · Cenários em execução: ${s.busy||0} · Em pausa: ${s.paused||0}\nMemória do gerador: ${number(s.rssMB,0)} MB · CPU do gerador: ${number(s.cpuPercent)}% (100% = 1 núcleo)\nEvent loop principal: ${number(s.eventLoopLagMs)} ms · Workers: ${number(s.workerEventLoopLagMs)} ms\nCarga: ${number(s.loadElapsed)}s · Drenagem: ${number(s.drainElapsed)}s · RPS da carga: ${number(s.loadRps)}\nTentativas interrompidas: ${s.interruptedRequests || 0}`;
   $('result-title').textContent=job.name;$('result-verdict').textContent=text;$('result-verdict').className=$('verdict').className;
-  $('result-context').textContent=`${s.purpose==='check'?'Verificação funcional de um cenário; não comprova capacidade de carga.':'Modelo fechado de usuários simultâneos.'} ${s.samples===undefined?'Volume de respostas não registrado.':`${number(s.samples,0)} respostas com latência.`} Metodologia ${s.methodologyVersion || '1 (histórico)'} · carga ${number(s.loadElapsed)}s · drenagem ${number(s.drainElapsed)}s · RPS global ${number(s.rps)} · RPS da carga ${number(s.loadRps)}. ${$('report-message').textContent}`;
-  $('result-repeat').hidden=!finished;$('result-repeat').textContent=job.canRepeat?'Executar novamente':'Escolher teste para repetir';
+  $('result-context').textContent=`${s.purpose==='check'?'Verificação funcional de um cenário; não comprova capacidade de carga.':s.loadModel==='arrival'?'Modelo aberto de chegada de cenários.':'Modelo fechado de usuários simultâneos.'} ${s.samples===undefined?'Volume de respostas não registrado.':`${number(s.samples,0)} respostas com latência.`} Metodologia ${s.methodologyVersion || '1 (histórico)'} · carga ${number(s.loadElapsed)}s · drenagem ${number(s.drainElapsed)}s · RPS global ${number(s.rps)} · RPS da carga ${number(s.loadRps)}. ${$('report-message').textContent}`;
+  $('result-repeat').hidden=!finished;$('result-repeat').disabled=repeatPending || workspaceBusy || s.reportStatus==='generating';$('result-repeat').textContent=job.canRepeat?'Executar novamente':'Escolher teste para repetir';
   $('result-xlsx').hidden=!ready;$('result-xlsx').href=$('xlsx').href;$('result-regenerate').hidden=$('regenerate').hidden;
   tableBody('criteria-table',s.evaluation?.criteria.map(c=>[c.label,c.observed,c.limit,s.evaluation.provisional?'Provisório':c.passed?'Passou':'Falhou']) || [['Metodologia original','Não registrado','—','Consultar XLSX']]);
-  tableBody('evidence-table',s.stages?.map(stage=>[stage.stage,stage.target,stage.plannedUserSeconds,stage.observedUserSeconds,stage.loadPercent===null?'Sem carga':`${number(stage.loadPercent)}%`]) || [['Não registrado','—','—','—','—']]);
-  tableBody('integrity-table',s.reportInfo?.integrityDetails?.checks.map(c=>[c.counter,c.expected,c.recorded,c.matches?'Confere':'Diverge']) || [['Conferência disponível após a coleta','—','—','—']]);
+  const evidenceHeaders=$('evidence-table').querySelectorAll('th');evidenceHeaders[2].textContent=s.loadModel==='arrival'?'Chegadas planejadas':'Usuários-segundo planejados';evidenceHeaders[3].textContent=s.loadModel==='arrival'?'Inícios confirmados':'Usuários-segundo observados';
+  tableBody('evidence-table',s.stages?.map(stage=>[stage.stage,stage.target,stage.plannedArrivals !== undefined && selectedJob?.result?.loadModel==='arrival'?stage.plannedArrivals:stage.plannedUserSeconds,stage.plannedArrivals !== undefined && selectedJob?.result?.loadModel==='arrival'?stage.startedArrivals:stage.observedUserSeconds,stage.loadPercent===null?'Sem carga':`${number(stage.loadPercent)}%`]) || [['Não registrado','—','—','—','—']]);
+  tableBody('integrity-table',s.reportInfo?.integrityDetails?.checks.map(c=>[({samples:'Respostas com latência',failedRequests:'Tentativas HTTP com falha',transportErrors:'Falhas de transporte',p50:'p50 (ms)',p95:'p95 (ms)',p99:'p99 (ms)',latencySum:'Soma de latências (ms)',requests:'Tentativas HTTP',assertions:'Validações',assertionFailures:'Validações reprovadas',scriptFailures:'Falhas de scripts',runFailures:'Falhas de execução',runs:'Cenários concluídos',startedRequests:'Tentativas iniciadas',startedRuns:'Cenários iniciados',plannedArrivals:'Chegadas planejadas registradas',arrivalDispositions:'Chegadas confirmadas/descartadas',telemetrySamples:'Amostras de telemetria',eventIdentity:'Identidade e encerramento dos eventos',workerBuffers:'Buffers dos workers'})[c.counter] || c.counter,c.expected,c.recorded,c.matches?'Confere':'Diverge']) || [['Conferência disponível após a coleta','—','—','—']]);
   tableBody('endpoints-table',s.reportInfo?.endpoints?.map(e=>[e.name,e.method,e.requests,e.failed,e.p95]) || [['Disponível após gerar o relatório','—','—','—','—']]);
   const f=s.reportInfo?.failureCounts || {http:Object.entries(s.codes || {}).reduce((n,[code,count])=>n+(Number(code)>=400?count:0),0),transport:s.transportErrors || 0,validation:s.assertionFailures || 0,script:s.scriptFailures || 0,run:s.runFailures || 0};
   $('failure-summary').textContent=`HTTP: ${f.http} · Transporte: ${f.transport} · Validações: ${f.validation} · Scripts: ${f.script} · Execuções: ${f.run}. A taxa HTTP não soma falhas de validação.`;
+  $('executive-summary').textContent=`${number(s.requests,0)} tentativas · throughput da carga ${number(s.loadRps)} req/s · ${number(s.scenarios?.p95)} ms de p95 por cenário · ${s.evaluation?.reasons.length || 0} motivos de atenção. Aprovação vale para o cenário, os limites e o ambiente desta execução.`;
   comparisonOptions.set(job.id,job.name);renderComparisonOptions();
 }
 $('cancel').onclick=async()=>{try{await api(`/api/runs/${selected}/cancel`,{});await refresh();}catch(e){showError(e);}};
@@ -432,14 +462,17 @@ $('compare-runs').onclick=async()=>{
   if(!baseline || !id || baseline===id){$('comparison-note').textContent='Selecione uma referência diferente da execução atual.';return;}
   try {
     const data=await api(`/api/runs/compare?left=${encodeURIComponent(baseline)}&right=${encodeURIComponent(id)}`);if(id!==selected)return;
-    $('comparison-note').textContent=data.differences.length?`Configurações diferentes: ${data.differences.map(d=>d.field).join(', ')}. Considere essas diferenças ao interpretar as métricas.`:'As configurações registradas são iguais. Variações não comprovam causalidade.';
-    $('comparison-output').replaceChildren(simpleTable(['Métrica','Referência','Selecionada','Diferença','Variação (%)'],data.metrics.map(m=>[m.field,m.left,m.right,m.delta,m.percent])),simpleTable(['Configuração diferente','Referência','Selecionada'],data.differences.map(d=>[d.field,d.left,d.right])));
+    $('comparison-note').textContent=!data.compatible?`Comparação com ressalvas. Configurações diferentes: ${data.differences.map(d=>d.field).join(', ')}. Considere essas diferenças ao interpretar as métricas.`:'As configurações registradas são iguais. Variações não comprovam causalidade.';
+    $('comparison-output').replaceChildren(simpleTable(['Métrica','Referência','Selecionada','Diferença','Variação (%)'],data.metrics.map(m=>[({requests:'Tentativas HTTP',samples:'Respostas com latência',rps:'Média global (req/s)',loadRps:'Carga (req/s)',p95:'p95 (ms)',p99:'p99 (ms)',errorRate:'Falhas (%)'})[m.field] || m.field,m.left,m.right,m.delta,m.percent])),simpleTable(['Configuração diferente','Referência','Selecionada'],data.differences.map(d=>[d.field,d.left,d.right])));
   }catch(e){$('comparison-note').textContent=e.message;}
 };
-const graphSpecs=[{key:'active',label:'Usuários observados / último alvo',unit:'usuários',target:true},{key:'rps',label:'RPS por janela',unit:'req/s'},{key:'p95',label:'p95 por janela',unit:'ms'},{key:'errorRate',label:'Falhas HTTP / conexão',unit:'%',percent:true}];
+const baseGraphSpecs=[{key:'active',label:'Usuários observados / último alvo',unit:'usuários',target:true},{key:'rps',label:'RPS por janela',unit:'req/s'},{key:'p95',label:'p95 por janela',unit:'ms'},{key:'errorRate',label:'Falhas HTTP / conexão',unit:'%',percent:true},{key:'successRps',label:'Sucessos HTTP por janela',unit:'req/s'},{key:'scenarioRps',label:'Cenários concluídos por janela',unit:'cenários/s'}];
 function svgElement(name,attrs={}) {const el=document.createElementNS('http://www.w3.org/2000/svg',name);Object.entries(attrs).forEach(([key,value])=>el.setAttribute(key,value));return el;}
 function renderCharts(data) {
-  const container=$('metric-charts');
+  const arrival=selectedJob?.result?.loadModel==='arrival';
+  const graphSpecs=baseGraphSpecs.map(spec=>spec.key==='active'?{...spec,target:!arrival,label:arrival?'Usuários alocados (modelo de chegada)':spec.label}:spec);
+  if(arrival)graphSpecs.push({key:'startedScenarioRps',label:'Cenários iniciados/s e taxa alvo',unit:'cenários/s',target:true});
+  const container=$('metric-charts');if(container.dataset.model!==String(arrival)){container.replaceChildren();container.dataset.model=String(arrival);}
   if(!container.children.length)for(const spec of graphSpecs){
     const card=document.createElement('section');card.className='metric-chart';card.dataset.metric=spec.key;
     const title=document.createElement('h3');title.textContent=spec.label;
@@ -455,8 +488,10 @@ function renderCharts(data) {
     const end=data.length?data[data.length-1].second+data[data.length-1].duration:1;
     const x=second=>45+second/end*580,y=value=>155-value/maximum*130;
     const children=[];
+    if(data.length){for(const [from,to,label,color]of [[0,(seriesPhases.loadStartedAt-data[0].ts)/1000,'Aquecimento','#75693c'],[(seriesPhases.loadEndedAt-data[0].ts)/1000,end,'Drenagem','#455e83']]){if(Number.isFinite(from)&&Number.isFinite(to)&&to>from&&from<end){const a=Math.max(0,from),b=Math.min(end,to);children.push(svgElement('rect',{x:x(a),y:22,width:Math.max(0,x(b)-x(a)),height:133,fill:color,opacity:.15}));const text=svgElement('text',{x:x(a)+3,y:34,fill:'#c0cad7','font-size':11});text.textContent=label;children.push(text);}}}
+    for(const stage of selectedJob?.result?.stages || [])if(stage.startedAt && data.length){const offset=(stage.startedAt-data[0].ts)/1000;if(offset>=0&&offset<=end){children.push(svgElement('line',{x1:x(offset),x2:x(offset),y1:20,y2:155,stroke:'#6a8098','stroke-dasharray':'3 4'}));const label=svgElement('text',{x:x(offset)+3,y:16,fill:'#b2c2d3','font-size':11});label.textContent=`E${stage.stage}`;children.push(label);}}
     for(let i=0;i<3;i++){const value=maximum*i/2;children.push(svgElement('line',{x1:45,x2:625,y1:y(value),y2:y(value),stroke:'#3d4651'}));const label=svgElement('text',{x:40,y:y(value)+4,'text-anchor':'end',fill:'#c0cad7','font-size':12});label.textContent=number(value,1);children.push(label);}
-    const path=key=>{let segment=false;return data.map(p=>{const value=key==='target'?p.target:val(p);if(value===null || value===undefined){segment=false;return '';}const command=segment?'L':'M';segment=true;return `${command} ${x(p.second)} ${y(value)}`;}).join(' ');};
+    const path=key=>{let segment=false;return data.map(p=>{const value=key==='target'?p.target:val(p);if(value===null || value===undefined){segment=false;return '';}const command=segment?(key==='target'?'H':'L'):'M';const part=command==='H'?`H ${x(p.second)} V ${y(value)}`:`${command} ${x(p.second)} ${y(value)}`;segment=true;return part;}).join(' ');};
     children.push(svgElement('path',{d:path(spec.key),fill:'none',stroke:'#c0f780','stroke-width':2.5}));
     if(spec.target)children.push(svgElement('path',{d:path('target'),fill:'none',stroke:'#8fb9ef','stroke-width':2,'stroke-dasharray':'5 4'}));
     // A singleton M path has no visible line. Preserve isolated observations.
@@ -467,13 +502,14 @@ function renderCharts(data) {
     for(const [second,anchor]of [[0,'start'],[end,'end']]){const label=svgElement('text',{x:x(second),y:181,'text-anchor':anchor,fill:'#c0cad7','font-size':12});label.textContent=`${number(second,1)}s`;children.push(label);}
     svg.replaceChildren(...children);slider.disabled=!data.length;slider.max=Math.max(0,data.length-1);
     if(slider.dataset.run!==selected){slider.value=slider.max;slider.dataset.run=selected;}else if(document.activeElement!==slider)slider.value=slider.max;
-    const display=index=>{const p=data[index];card.querySelector('.chart-readout').textContent=p?`${new Date(p.ts).toLocaleTimeString('pt-BR')} · ${number(p.second,1)}–${number(p.second+p.duration,1)}s: ${number(val(p))} ${spec.unit}${spec.target?` · alvo ${number(p.target)}`:''}${spec.key==='p95'?` · ${number(p.samples,0)} respostas`:''}`:'Aguardando dados registrados.';};
+    const display=index=>{const p=data[index];card.querySelector('.chart-readout').textContent=p?`${new Date(p.ts).toLocaleTimeString('pt-BR')} · ${number(p.second,1)}–${number(p.second+p.duration,1)}s: ${number(val(p))} ${spec.unit}${spec.target?` · alvo ${number(p.target)}`:''}${p.partial?' · janela parcial':''}${spec.key==='p95'?` · ${number(p.samples,0)} respostas`:''}`:'Aguardando dados registrados.';};
     slider.oninput=()=>display(Number(slider.value));display(Number(slider.value));
     svg.onpointermove=event=>{if(!data.length)return;const rect=svg.getBoundingClientRect(),second=Math.max(0,Math.min(end,((event.clientX-rect.left)/rect.width*640-45)/580*end));const index=Math.min(data.length-1,data.findIndex(p=>p.second+p.duration>second));display(index<0?data.length-1:index);};
   }
 }
 renderCharts([]);
 function renderHistory(data) {
+  workspaceBusy=data.overview.busy===true;executionAvailability();
   runs=data.items;const signature=JSON.stringify([runs,selected,historyPage,data.total]);
   $('count').textContent=`${data.total} execuções`;$('nav-count').textContent=data.overview.total;
   $('overview-total').textContent=data.overview.total;$('overview-completed').textContent=data.overview.completed;$('overview-scheduled').textContent=data.overview.scheduled;
@@ -509,8 +545,9 @@ async function refresh() {
   if(id!==selected || sequence!==refreshSequence)return;render(job);
   const key=`${job.id}:${job.status}:${job.result?.reportStatus}`;
   if(seriesKey!==key || ['running','stopping'].includes(job.status)) {
-    const data=await api(`/api/runs/${id}/series`);if(id!==selected)return;
-    points=data.points;seriesKey=key;renderCharts(points);
+    const from=points.length?points[Math.max(0,points.length-2)].ts:undefined;
+    const data=await api(`/api/runs/${id}/series${from!==undefined?`?from=${from}&interval=${seriesInterval || 1}`:''}`);if(id!==selected)return;
+    points=from!==undefined&&!data.reset?[...points.filter(p=>p.ts<from),...(data.points || [])]:(data.points || []);seriesInterval=data.interval;seriesPhases=data.phases || {};seriesKey=key;renderCharts(points);
     $('series-message').textContent=data.available===false?data.reason:`${points.length} janelas persistidas · consultas por horário real. Verde: observado; azul tracejado: alvo.`;
   }
 }
@@ -519,5 +556,5 @@ $('history-search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeou
 $('history-status').onchange=()=>{historyPage=1;refresh().catch(showError);};
 $('history-prev').onclick=()=>{historyPage=Math.max(1,historyPage-1);refresh().catch(showError);};
 $('history-next').onclick=()=>{historyPage++;refresh().catch(showError);};
-async function poll(){try{await refresh();$('connection').classList.remove('offline');$('connection-label').textContent='Servidor conectado';}catch(e){$('connection').classList.add('offline');$('connection-label').textContent='Servidor desconectado';}finally{setTimeout(poll,1000);}}
+async function poll(){try{await refresh();$('connection').classList.remove('offline');$('connection-label').textContent='Servidor conectado';}catch(e){$('connection').classList.add('offline');$('connection-label').textContent='Servidor desconectado';if(selectedJob?.result)renderMetrics(selectedJob.result);}finally{setTimeout(poll,1000);}}
 poll();

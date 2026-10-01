@@ -7,9 +7,9 @@ async function main() {
   }
   if(args.csv)throw new Error('A exportação agora é XLSX. Use --xlsx=relatorio.xlsx');
   if (!args.collection) throw new Error('Use --collection=examples/local.postman_collection.json');
-  const runner = new Runner({...args, collection: JSON.parse(fs.readFileSync(args.collection, 'utf8')),
+  const runner = new Runner({...args,loadModel:args.loadModel || 'users',maxConcurrent:args.maxConcurrent,warmupSec:args.warmupSec,endpointThresholds:args.endpointThresholds?JSON.parse(args.endpointThresholds):[], collection: JSON.parse(fs.readFileSync(args.collection, 'utf8')),
     environment: args.environment ? JSON.parse(fs.readFileSync(args.environment, 'utf8')) : undefined,
-    stages: args.stages || '30:10,60:20', evidence:{minResponses:args.minResponses ?? 100,minLoadPercent:args.minLoadPercent ?? 90}, thresholds: {p95: args.p95 || 1000, errorRate: args.errorRate ?? 1}}, args.xlsx || `stress-report-${new Date().toISOString().replace(/[:.]/g,'-')}.xlsx`);
+    stages: args.stages?.startsWith('[')?JSON.parse(args.stages):args.stages || '30:10,60:20', evidence:{minResponses:args.minResponses ?? 100,minLoadPercent:args.minLoadPercent ?? 90}, thresholds: {p95: args.p95 || 1000, errorRate: args.errorRate ?? 1}}, args.xlsx || `stress-report-${new Date().toISOString().replace(/[:.]/g,'-')}.xlsx`);
   runner.on('snapshot', s => console.log(JSON.stringify(s)));
   const cancel = () => runner.stop(); process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
   const result = await runner.start();

@@ -8,7 +8,8 @@
     "load": "node load-runner.js",
     "test": "node --test test/*.test.js",
     "demo:target": "node examples/target.js",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "benchmark": "node scripts/benchmark.js"
   },
   "keywords": [],
   "author": "",

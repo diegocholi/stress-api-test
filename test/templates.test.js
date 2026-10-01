@@ -40,7 +40,7 @@ test('invalid saved definitions are rejected without creating an entry',t=>{
 test('separate timeouts and evidence persist through edits, copies and reloads',t=>{
   const {templates,dir}=store(t);const input={...builder,scriptTimeout:2000,scenarioTimeout:0,drainTimeout:60000,evidence:{minResponses:120,minLoadPercent:95}};
   const created=templates.create(input),copy=templates.duplicate(created.id),loaded=new TemplateStore(dir).get(copy.id).definition;
-  assert.equal(loaded.schemaVersion,2);assert.equal(loaded.scriptTimeout,2000);assert.equal(loaded.scenarioTimeout,0);assert.equal(loaded.drainTimeout,60000);assert.deepEqual(loaded.evidence,input.evidence);
+  assert.equal(loaded.schemaVersion,3);assert.equal(loaded.scriptTimeout,2000);assert.equal(loaded.scenarioTimeout,0);assert.equal(loaded.drainTimeout,60000);assert.deepEqual(loaded.evidence,input.evidence);
 });
 test('unversioned saved tests keep their previous global timeout when loaded',t=>{
   const {templates,dir}=store(t);const saved=templates.create(builder);const filename=path.join(dir,'templates',`${saved.id}.json`),old=JSON.parse(fs.readFileSync(filename));

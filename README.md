@@ -17,7 +17,7 @@ As duas abas usam os mesmos estágios, timeouts, pausa entre cenários, threads,
 
 No editor, variáveis são escritas uma por linha (`BASE_URL=http://127.0.0.1:4000`) e headers como `Authorization: Bearer {{TOKEN}}`. Use `{{NOME}}` na URL, nos headers e no corpo. Para um fluxo de login, extraia o campo `data.token` da resposta e salve em `TOKEN`; os próximos passos podem usar `{{TOKEN}}`. A extração vale dentro da execução do cenário de cada usuário. Caminhos JSON usam pontos, inclusive índices de arrays (`items.0.id`), e valores esperados usam sintaxe JSON (`123`, `true`, `"texto"`).
 
-A agenda e o histórico persistem em `.runs/`, ignorado pelo Git. O servidor precisa estar ligado para executar os agendamentos. Um teste roda por vez; agendamentos sobrepostos entram na fila. Ao reiniciar, testes interrompidos são marcados como falha e agendamentos pendentes voltam à fila. A interface permite cancelar e baixar o relatório XLSX ao terminar. Collections e environments de testes pendentes são armazenados localmente com permissões restritas e removidos do histórico ao encerrar. Não use o histórico para compartilhar credenciais.
+A agenda e o histórico persistem em `.runs/`, ignorado pelo Git. O servidor precisa estar ligado para executar os agendamentos. Um teste roda por vez; agendamentos sobrepostos entram na fila. Ao reiniciar, testes interrompidos são marcados como falha e agendamentos pendentes voltam à fila. A interface permite cancelar e baixar o relatório XLSX ao terminar. Collections e environments de testes pendentes são armazenados localmente com permissões restritas e removidos dos metadados públicos ao encerrar; a configuração privada é preservada para repetição. Não use o histórico para compartilhar credenciais.
 
 ## Configuração, acompanhamento e resultados
 
@@ -32,7 +32,7 @@ O histórico tem busca, filtros e páginas de 20 execuções. As atualizações 
 
 ## Aprovação e evidência
 
-Novos testes usam metodologia **2.0**, com os limites iniciais configuráveis de **100 respostas com latência** e **90% da carga planejada em cada estágio com alvo positivo**. O mínimo de respostas não é garantia estatística; o tamanho da amostra acompanha os percentis.
+Novos testes usam metodologia **3.0**, com os limites iniciais configuráveis de **100 respostas com latência por estágio** e **90% da carga planejada em cada estágio com alvo positivo**. O mínimo de respostas não é garantia estatística; o tamanho da amostra acompanha os percentis.
 
 A carga é calculada em usuários-segundo: tempo efetivo de alocação de cada usuário dentro do estágio dividido por duração planejada × alvo. Em cada instante, usuários acima do alvo não compensam períodos abaixo do alvo. Usuários em pausa continuam alocados; esse indicador não representa requisições HTTP simultâneas. A interface distingue usuários alocados, cenários em execução e usuários em pausa.
 
@@ -119,22 +119,22 @@ Ao encerrar o teste, a interface prepara o arquivo e libera **Baixar relatório 
 
 Abas detalhadas têm filtros, cabeçalhos congelados, linhas alternadas, formatos numéricos e destaque de falhas. Elas são divididas automaticamente ao atingir o limite de linhas do Excel. Não há amostragem das tentativas. Corpos e headers não são incluídos; credenciais de URL e valores de query são ocultos. Mensagens de validação vêm dos scripts da collection; valores conhecidos de credenciais também são ocultos. Conteúdo sensível arbitrário produzido por scripts pode não ser reconhecido.
 
-Testes cancelados ou interrompidos geram um relatório identificado como parcial. A interface mostra erros de geração separadamente das falhas da API. Os eventos detalhados são removidos após uma geração bem-sucedida com integridade confirmada; metadados e série temporal permanecem para consulta. Em caso de falha, **Regenerar XLSX** reutiliza os registros sem executar a API novamente. A regeneração aguarda qualquer teste ativo para não interferir na medição. Linhas JSON truncadas aparecem como falha de integridade, com resultado parcial. Relatórios CSV do histórico anterior são convertidos para XLSX no download, indicando os campos que não existiam naquela versão.
+Testes cancelados ou interrompidos geram um relatório identificado como parcial. A interface mostra erros de geração separadamente das falhas da API. Na metodologia 3.0, os eventos detalhados são comprimidos, verificados por SHA-256 e preservados por sete dias; a limpeza ocorre quando o servidor está ocioso. Definições 2.0 mantêm a remoção após geração íntegra; metadados e série temporal permanecem para consulta. Em caso de falha, **Regenerar XLSX** reutiliza os registros sem executar a API novamente. A regeneração aguarda qualquer teste ativo para não interferir na medição. Duplicidades, lacunas de lotes, partidas não encerradas e linhas JSON truncadas aparecem como falha de integridade, com resultado parcial. Relatórios CSV do histórico anterior são convertidos para XLSX no download, indicando os campos que não existiam naquela versão.
 
 O CLI também gera XLSX automaticamente; use `--xlsx=relatorio.xlsx` para escolher o destino. O antigo `--csv` foi substituído. `npm start` e `pnpm start` instalam as novas dependências quando necessário.
 
 ## Como a medição funciona
 
 - Modelo fechado: cada usuário executa uma collection por vez e a repete. Threads hospedam vários usuários assíncronos. `maxWorkers` limita realmente o total de threads (1–32); o limite de usuários é 500 por estágio.
-- Estágios são degraus de concorrência, não uma rampa linear nem uma taxa fixa de chegadas. Inicialização leva tempo; acompanhe usuários ativos versus alvo. Reduções deixam as collections em andamento terminar. Ao final, há drenagem limitada por prazo. Cancelar impede novas execuções e aguarda as collections em andamento, dentro do prazo de encerramento.
+- Estágios permitem degraus ou rampas lineares. O modelo padrão usa concorrência; o modelo de chegada usa cenários/s. Inicialização leva tempo; acompanhe usuários ativos versus alvo. Reduções deixam as collections em andamento terminar. Ao final, há drenagem limitada por prazo. Cancelar impede novas execuções e aguarda as collections em andamento, dentro do prazo de encerramento.
 - Um único evento Newman `request` contabiliza tentativas HTTP concluídas, incluindo `pm.sendRequest`, respostas e falhas de transporte. Tentativas pendentes conhecidas são registradas como interrompidas quando um worker precisa ser encerrado à força. Não há soma duplicada com `summary.run.executions`.
 - HTTP ≥400 e falhas de transporte contam como requisições com falha. Assertions, scripts e erros de execução têm contadores próprios; qualquer falha nesses contadores reprova o teste. Taxa HTTP = requisições com falha / total de tentativas, sem misturar a quantidade de assertions.
 - p50/p95/p99 vêm exclusivamente do `responseTime` das requisições com resposta. Timeouts sem resposta entram na taxa de falhas, sem uma latência inventada. Histograma com resolução de 1 ms e teto de 600.000 ms; não usa amostragem enviesada. Não há percentil quando não há respostas.
 - RPS é a média desde o início, incluindo inicialização e drenagem. Métricas parciais chegam a cada 500 ms ou 100 requisições. O registro detalhado tem uma entrada por tentativa e validação, com buffer máximo de 8 MB. Após a medição, um worker gera o XLSX; o tempo de geração não entra na duração ou no RPS. Se o disco não acompanhar, o teste falha explicitamente.
 - Keep-alive é aplicado com agentes HTTP/HTTPS explícitos, conforme a [API oficial do Newman](https://github.com/postmanlabs/newman#newmanrunoptions-object--callback-function).
-- CPU do processo (100% equivale a um núcleo), memória e atraso do event loop principal e dos workers ajudam a identificar sobrecarga do gerador. CPU, banco, filas e memória da API precisam ser monitorados no ambiente de destino. O número de usuários configurado sozinho não comprova capacidade da API. No modelo fechado, uma API mais lenta faz os usuários iniciarem menos operações; não há controle de taxa de chegada.
+- CPU do processo (100% equivale a um núcleo), memória e atraso do event loop principal e dos workers ajudam a identificar sobrecarga do gerador. CPU, banco, filas e memória da API precisam ser monitorados no ambiente de destino. O número de usuários configurado sozinho não comprova capacidade da API. No modelo fechado, uma API mais lenta faz os usuários iniciarem menos operações; use o modelo de chegada para controlar a demanda.
 
-A interface fica em `127.0.0.1`; serve para uso local. Porta configurável com `PORT=3001 npm start`. Importação limitada a 5 MB. O projeto não inclui execução distribuída, controle de RPS ou agendamento recorrente.
+A interface fica em `127.0.0.1`; serve para uso local. Porta configurável com `PORT=3001 npm start`. Importação limitada a 5 MB. O projeto não inclui execução distribuída nem agendamento recorrente. O modelo de chegada controla cenários/s; equivale a RPS planejado quando o cenário tem uma requisição.
 
 ## Validação
 
@@ -158,7 +158,7 @@ As rotas anteriores continuam disponíveis. `GET /api/runs` sem paginação mant
 | `GET /api/runs/compare?left=idA&right=idB` | Diferenças de configuração e métricas; variação relativa é indisponível quando a referência é zero. |
 | `POST /api/runs/:id/regenerate` | Refazer XLSX a partir de eventos preservados. |
 
-Definições e resultados novos incluem `schemaVersion: 2`; resultados incluem `methodologyVersion: "2.0"`. A avaliação expõe `verdict`, `provisional`, `criteria` e `reasons`. Parâmetros novos: `scriptTimeout`, `scenarioTimeout`, `drainTimeout` e `evidence: {minResponses, minLoadPercent}`. `singleRun: true` normaliza a configuração para uma verificação funcional com um usuário, uma thread e uma única execução.
+Definições e resultados novos incluem `schemaVersion: 3`; resultados incluem `methodologyVersion: "3.0"`. Definições 2.0 preservam os critérios globais; a interface oferece atualização explícita para 3.0. A avaliação expõe `verdict`, `provisional`, `criteria` e `reasons`. Parâmetros novos: `scriptTimeout`, `scenarioTimeout`, `drainTimeout` e `evidence: {minResponses, minLoadPercent}`. `singleRun: true` normaliza a configuração para uma verificação funcional com um usuário, uma thread e uma única execução.
 
 Em resultados finais com relatório, as métricas públicas vêm dos registros que alimentam o XLSX; `engineMetrics` preserva os contadores originais do motor para conferência. Divergências são identificadas na tela e na planilha. Dados recuperados de uma interrupção continuam parciais.
 
@@ -177,3 +177,42 @@ A suíte cobre validação sem tráfego, foco de erros, duplicação/recolhiment
 ## Dependências
 
 Os lockfiles preservam Newman 6.2.2; Playwright é dependência de desenvolvimento para validar a interface. Use `npm audit` para consultar a situação atual das dependências transitivas. Não foi aplicada troca forçada da versão principal do Newman. Importe collections e scripts de origem confiável.
+
+
+## Metodologia 3.0 e throughput ao vivo
+
+A aprovação exige p95, taxa de falhas e amostra suficiente globalmente **e em cada estágio com carga positiva**. Um estágio lento não pode ficar diluído nos anteriores. Critérios de p95 por endpoint são opcionais, por nome único, com amostra mínima própria; nomes ambíguos não aprovam. O aquecimento é opcional e excluído das métricas de performance avaliadas. Tentativas de aquecimento continuam no histórico e na planilha, e falhas de scripts/validações permanecem visíveis.
+
+O painel apresenta tentativas HTTP/s, sucessos HTTP/s e cenários concluídos/s. Sucesso HTTP significa ausência de falha HTTP/transporte; não garante aprovação das validações. A taxa recente usa a última janela completa de um segundo, após 500 ms para receber lotes dos workers. A média dos últimos cinco segundos é ponderada pelo tempo disponível. Antes da primeira janela completa aparece “Coletando”; testes encerrados sem janela completa mostram “Sem janela”. As médias globais incluem inicialização, aquecimento e drenagem. Janelas parciais são identificadas no gráfico e no XLSX.
+
+“Executar uma vez” mostra **Fluxo aprovado**, sem critérios de capacidade ou p95. A metodologia 2.0 é preservada ao carregar/repetir definições anteriores; novos modelos, rampas, aquecimento e critérios por endpoint exigem atualização explícita para 3.0.
+
+Atraso do event loop principal ou de workers acima de 100 ms em três observações consecutivas de carga torna a evidência inconclusiva. O limite pode ser configurado nas opções avançadas ou pelo parâmetro `generatorLagLimitMs`. CPU elevada, isoladamente, não reprova. Esse detector não garante ausência de interferência menor do gerador; consulte a calibração abaixo.
+
+### Perfis e taxa de chegada
+
+No editor, defina p95 e amostra mínima por requisição. No modo Postman, use “Critérios por endpoint”, com uma regra `Nome | p95 em ms | amostra mínima` por linha.
+
+Use os perfis editáveis de carga constante, stress progressivo, pico e longa duração. Para rampas, informe alvo inicial e final de cada estágio. O gráfico mostra a trajetória planejada.
+
+No modelo de chegada, o gerador planeja **inícios de cenários/s**, com limite de simultaneidade. Partidas atrasadas mais de 100 ms, inclusive na recepção pelo worker, são descartadas. O cumprimento compara inícios reais confirmados pelos workers com chegadas planejadas. Não há fila de compensação para recuperar demanda perdida em rajadas. Cancelamentos e interrupções mantêm resultados parciais.
+
+Exemplo de CLI:
+
+```bash
+node load-runner.js \
+  --collection=examples/local.postman_collection.json \
+  --loadModel=arrival --maxConcurrent=100 --warmupSec=5 \
+  --stages='[{"durationSec":30,"fromTarget":5,"target":20,"ramp":true},{"durationSec":60,"target":20}]' \
+  --minResponses=100 --minLoadPercent=90 --xlsx=relatorio.xlsx
+```
+
+O XLSX acrescenta duração dos cenários global/por estágio (percentis de cenário não usam o teto de 600.000 ms aplicado ao HTTP), throughput HTTP e cenários por janela, evidências de chegadas, diagnóstico do gerador e links internos. O resumo executivo usa throughput da carga como indicador principal. Regeneração a partir do arquivo comprimido não envia novas requisições à API.
+
+### Calibração independente e limites observados
+
+Execute `pnpm benchmark` contra a API local controlada. Para incluir JMeter, informe `JMETER_BIN=/caminho/bin/jmeter pnpm benchmark`. São cinco repetições sequenciais com cinco usuários, respostas com atraso de 100 ms, duração de 10 s e janela estável de 3–9 s. O servidor confere todas as contagens independentemente. A calibração também compara registro detalhado e consulta do painel sob carga. Artefatos ficam em `.runs/benchmark/`; nenhuma ferramenta é instalada automaticamente por esse comando.
+
+A execução de referência está em `benchmarks/reference.json`. Ela mede o comportamento desta máquina e deste cenário HTTP simples; não define capacidade de uma API externa nem promete equivalência ao JMeter. Diferenças superiores a 5% de throughput ou ao maior entre 10%/10 ms de p95 são registradas para investigação, sem alterar as métricas para fazê-las coincidir.
+
+O motor inicia uma execução Newman isolada para cada cenário. Esse custo reduz o throughput em modelo fechado, e a ocupação dos workers pode elevar o tempo observado de resposta. O benchmark registra a diferença entre duração do cenário e latência HTTP; essa diferença inclui inicialização, scripts e processamento, não somente tempo da API. Para avaliar demanda fixa, use taxa de chegada e confira cumprimento e atrasos do gerador. Monitore a API no ambiente de destino.

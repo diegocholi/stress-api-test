@@ -1,0 +1,367 @@
+{
+  "generatedAt": "2026-10-01T22:59:31.796Z",
+  "environment": {
+    "node": "v22.23.2",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Max",
+    "cores": 14,
+    "memoryGB": 36
+  },
+  "workload": {
+    "protocol": "HTTP/1.1",
+    "users": 5,
+    "delayMs": 100,
+    "seconds": 10,
+    "repetitions": 5,
+    "steadyWindowSec": [
+      3,
+      9
+    ]
+  },
+  "comparison": [
+    {
+      "repetition": 1,
+      "stress": {
+        "requests": 201,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 402,
+        "samples": 201,
+        "sum": 20899,
+        "min": 99,
+        "max": 124,
+        "average": 103.97512437810946,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 113,
+        "p95": 119,
+        "p99": 122,
+        "rps": 33.5,
+        "totalRequests": 319,
+        "oracleRequests": 319,
+        "scenarioAverageMs": 151.54703766144195,
+        "integrity": true,
+        "scenarioNonHttpMs": 47.506285310344765
+      },
+      "jmeter": {
+        "requests": 290,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 0,
+        "samples": 290,
+        "sum": 29752,
+        "min": 100,
+        "max": 107,
+        "average": 102.59310344827587,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 104,
+        "p95": 105,
+        "p99": 107,
+        "rps": 48.333333333333336,
+        "totalRequests": 485,
+        "oracleRequests": 485
+      },
+      "deltas": {
+        "throughputPercent": -30.6896551724138,
+        "p95Ms": 14
+      },
+      "withinTolerance": {
+        "throughput": false,
+        "p95": false
+      }
+    },
+    {
+      "repetition": 2,
+      "stress": {
+        "requests": 180,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 360,
+        "samples": 180,
+        "sum": 18987,
+        "min": 100,
+        "max": 141,
+        "average": 105.48333333333333,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 118,
+        "p95": 124,
+        "p99": 133,
+        "rps": 30,
+        "totalRequests": 287,
+        "oracleRequests": 287,
+        "scenarioAverageMs": 165.59693332404163,
+        "integrity": true,
+        "scenarioNonHttpMs": 60.31121903832734
+      },
+      "jmeter": {
+        "requests": 290,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 0,
+        "samples": 290,
+        "sum": 29814,
+        "min": 100,
+        "max": 108,
+        "average": 102.80689655172414,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 104,
+        "p95": 106,
+        "p99": 107,
+        "rps": 48.333333333333336,
+        "totalRequests": 485,
+        "oracleRequests": 485
+      },
+      "deltas": {
+        "throughputPercent": -37.93103448275862,
+        "p95Ms": 18
+      },
+      "withinTolerance": {
+        "throughput": false,
+        "p95": false
+      }
+    },
+    {
+      "repetition": 3,
+      "stress": {
+        "requests": 180,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 360,
+        "samples": 180,
+        "sum": 19071,
+        "min": 100,
+        "max": 182,
+        "average": 105.95,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 115,
+        "p95": 122,
+        "p99": 138,
+        "rps": 30,
+        "totalRequests": 298,
+        "oracleRequests": 298,
+        "scenarioAverageMs": 160.55799400335573,
+        "integrity": true,
+        "scenarioNonHttpMs": 55.18886648657721
+      },
+      "jmeter": {
+        "requests": 290,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 0,
+        "samples": 290,
+        "sum": 29798,
+        "min": 101,
+        "max": 107,
+        "average": 102.75172413793103,
+        "errorRate": 0,
+        "p50": 103,
+        "p90": 104,
+        "p95": 105,
+        "p99": 106,
+        "rps": 48.333333333333336,
+        "totalRequests": 485,
+        "oracleRequests": 485
+      },
+      "deltas": {
+        "throughputPercent": -37.93103448275862,
+        "p95Ms": 17
+      },
+      "withinTolerance": {
+        "throughput": false,
+        "p95": false
+      }
+    },
+    {
+      "repetition": 4,
+      "stress": {
+        "requests": 186,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 372,
+        "samples": 186,
+        "sum": 19249,
+        "min": 99,
+        "max": 136,
+        "average": 103.48924731182795,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 110,
+        "p95": 118,
+        "p99": 126,
+        "rps": 31,
+        "totalRequests": 296,
+        "oracleRequests": 296,
+        "scenarioAverageMs": 161.86973225675655,
+        "integrity": true,
+        "scenarioNonHttpMs": 58.23797549999979
+      },
+      "jmeter": {
+        "requests": 290,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 0,
+        "samples": 290,
+        "sum": 29922,
+        "min": 101,
+        "max": 109,
+        "average": 103.17931034482758,
+        "errorRate": 0,
+        "p50": 103,
+        "p90": 105,
+        "p95": 106,
+        "p99": 108,
+        "rps": 48.333333333333336,
+        "totalRequests": 480,
+        "oracleRequests": 480
+      },
+      "deltas": {
+        "throughputPercent": -35.862068965517246,
+        "p95Ms": 12
+      },
+      "withinTolerance": {
+        "throughput": false,
+        "p95": false
+      }
+    },
+    {
+      "repetition": 5,
+      "stress": {
+        "requests": 191,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 382,
+        "samples": 191,
+        "sum": 19987,
+        "min": 99,
+        "max": 143,
+        "average": 104.64397905759162,
+        "errorRate": 0,
+        "p50": 102,
+        "p90": 117,
+        "p95": 121,
+        "p99": 130,
+        "rps": 31.833333333333332,
+        "totalRequests": 304,
+        "oracleRequests": 304,
+        "scenarioAverageMs": 158.57357346710546,
+        "integrity": true,
+        "scenarioNonHttpMs": 54.2742313618423
+      },
+      "jmeter": {
+        "requests": 290,
+        "failed": 0,
+        "transport": 0,
+        "bytes": 0,
+        "samples": 290,
+        "sum": 29789,
+        "min": 101,
+        "max": 108,
+        "average": 102.72068965517241,
+        "errorRate": 0,
+        "p50": 103,
+        "p90": 105,
+        "p95": 105,
+        "p99": 107,
+        "rps": 48.333333333333336,
+        "totalRequests": 485,
+        "oracleRequests": 485
+      },
+      "deltas": {
+        "throughputPercent": -34.13793103448276,
+        "p95Ms": 16
+      },
+      "withinTolerance": {
+        "throughput": false,
+        "p95": false
+      }
+    }
+  ],
+  "capacity": [
+    {
+      "users": 1,
+      "threads": 1,
+      "record": true,
+      "monitor": false,
+      "requests": 35,
+      "oracleRequests": 35,
+      "rps": 6.798484615123631,
+      "p95": 104,
+      "loadPercent": 96.032119140625,
+      "cpuPercent": 57.558110260972065,
+      "eventLoopLagMs": 5.503624999997555,
+      "rssMB": 351.09375,
+      "verdict": "approved"
+    },
+    {
+      "users": 10,
+      "threads": 1,
+      "record": true,
+      "monitor": false,
+      "requests": 203,
+      "oracleRequests": 203,
+      "rps": 38.601334460195204,
+      "p95": 134,
+      "loadPercent": 96.400759765625,
+      "cpuPercent": 160.3990840517351,
+      "eventLoopLagMs": 72.06566699998803,
+      "rssMB": 1509.109375,
+      "verdict": "approved"
+    },
+    {
+      "users": 50,
+      "threads": 4,
+      "record": true,
+      "monitor": false,
+      "requests": 616,
+      "oracleRequests": 616,
+      "rps": 114.37627585840593,
+      "p95": 204,
+      "loadPercent": 95.90084052734375,
+      "cpuPercent": 483.5072241416454,
+      "eventLoopLagMs": 240.19083300000057,
+      "rssMB": 4279.171875,
+      "verdict": "approved"
+    },
+    {
+      "users": 50,
+      "threads": 4,
+      "record": false,
+      "monitor": false,
+      "requests": 637,
+      "oracleRequests": 637,
+      "rps": 117.37426133751626,
+      "p95": 217,
+      "loadPercent": 95.9063146484375,
+      "cpuPercent": 578.0506214421956,
+      "eventLoopLagMs": 144.7286670000176,
+      "rssMB": 6027.0625,
+      "verdict": "approved"
+    },
+    {
+      "users": 50,
+      "threads": 4,
+      "record": true,
+      "monitor": true,
+      "requests": 638,
+      "oracleRequests": 638,
+      "rps": 117.7731215053752,
+      "p95": 201,
+      "loadPercent": 95.23678769531249,
+      "cpuPercent": 575.260818182443,
+      "eventLoopLagMs": 152.68370799999684,
+      "rssMB": 5958.875,
+      "verdict": "approved"
+    }
+  ],
+  "interpretation": "Diferen\u00e7as de throughput em modelo fechado devem ser investigadas pelo custo de iniciar/processar cada cen\u00e1rio Newman, registrado em scenarioNonHttpMs. Lat\u00eancias s\u00e3o comparadas separadamente; igualdade de usu\u00e1rios n\u00e3o garante igualdade de demanda.",
+  "limitations": [
+    "Refer\u00eancia coletada antes da adi\u00e7\u00e3o do detector de atraso sustentado; vereditos de capacidade representam a avalia\u00e7\u00e3o daquele momento.",
+    "Mesma m\u00e1quina hospeda alvo e gerador; valores n\u00e3o representam capacidade em rede remota.",
+    "Contagem exata n\u00e3o implica equival\u00eancia de throughput ou aus\u00eancia de interfer\u00eancia do gerador."
+  ]
+}

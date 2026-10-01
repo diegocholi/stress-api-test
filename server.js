@@ -7,6 +7,7 @@ const {validate,legacyInput} = require('./lib/config');
 const {Timeline}=require('./lib/measurement');
 const {compare}=require('./lib/comparison');
 const {writeJson}=require('./lib/storage');
+const {archiveEvents,cleanupArchives}=require('./lib/retention');
 const {generateReport}=require('./lib/report/run');
 const {TemplateStore,definition}=require('./lib/templates');
 const exportsInProgress=new Map();
@@ -39,23 +40,23 @@ async function series(job) {
   if (current?.job.id===job.id && current.runner) return current.runner.series();
   const stored=readJson(`${reportPath(job.id)}.timeline.json`);
   if(stored)return stored;
-  const metadata=readJson(`${reportPath(job.id)}.meta.json`),events=`${reportPath(job.id)}.events.ndjson`;
+  const metadata=readJson(`${reportPath(job.id)}.meta.json`),rawEvents=`${reportPath(job.id)}.events.ndjson`,events=fs.existsSync(rawEvents)?rawEvents:`${rawEvents}.gz`;
   if(!metadata || !fs.existsSync(events))return {schemaVersion:2,available:false,points:[],reason:'Evolução não registrada nesta versão.'};
   const timeline=new Timeline(metadata.startedAt,metadata.timelineInterval || 1);
-  const lines=require('node:readline').createInterface({input:fs.createReadStream(events),crlfDelay:Infinity});
+  const lines=require('node:readline').createInterface({input:events.endsWith('.gz')?fs.createReadStream(events).pipe(require('node:zlib').createGunzip()):fs.createReadStream(events),crlfDelay:Infinity});
   for await(const line of lines) {try{if(line.trim())timeline.observe(JSON.parse(line));}catch{/* A process crash may leave one incomplete trailing event. */}}
-  return {schemaVersion:2,methodologyVersion:metadata.methodologyVersion,points:timeline.points(job.result?.elapsed || metadata.result.elapsed)};
+  return {schemaVersion:metadata.schemaVersion || 2,methodologyVersion:metadata.methodologyVersion,phases:{warmupSec:metadata.config?.warmupSec || 0,loadStartedAt:metadata.loadStartedAt,loadEndedAt:metadata.loadEndedAt,stages:metadata.stageHistory},points:timeline.points(job.result?.elapsed || metadata.result.elapsed)};
 }
 async function regenerate(job) {
   if(['scheduled','running','stopping'].includes(job.status))throw Object.assign(new Error('Aguarde o encerramento do teste.'),{statusCode:409});
   if(current && ['running','stopping'].includes(current.job.status))throw Object.assign(new Error('Aguarde a execução ativa para não interferir na medição.'),{statusCode:409});
   if(exportsInProgress.has(job.id))return exportsInProgress.get(job.id);
-  const output=reportPath(job.id),events=`${output}.events.ndjson`,metadata=readJson(`${output}.meta.json`);
+  const output=reportPath(job.id),rawEvents=`${output}.events.ndjson`,events=fs.existsSync(rawEvents)?rawEvents:`${rawEvents}.gz`,metadata=readJson(`${output}.meta.json`);
   if(!metadata || !fs.existsSync(events))throw Object.assign(new Error('Registro original indisponível para regenerar este relatório.'),{statusCode:409});
   job.result={...job.result,reportStatus:'generating',reportError:undefined};save(job);
-  const promise=generateReport({output,events,metadata:{...metadata,result:{...metadata.result,...job.result}}}).then(info=>{
+  const promise=generateReport({output,events,metadata:{...metadata,result:{...metadata.result,...job.result}}}).then(async info=>{
     job.result={...job.result,...info.metrics,reportStatus:'ready',reportInfo:info,evaluation:info.evaluation || job.result.evaluation,passed:info.evaluation?info.evaluation.verdict==='approved':job.result.passed};
-    if(info.integrity)fs.unlinkSync(events);
+    if(info.integrity && !events.endsWith('.gz')) {if(metadata.schemaVersion>=3)await archiveEvents(events);else fs.unlinkSync(events);}
     save(job);return view(job);
   }).catch(err=>{job.result={...job.result,reportStatus:'error',reportError:err.message};save(job);throw err;}).finally(()=>exportsInProgress.delete(job.id));
   exportsInProgress.set(job.id,promise);return promise;
@@ -88,8 +89,10 @@ function launch(input,repeatedFrom) {
   fs.writeFileSync(temporary,JSON.stringify(definition(input)),{mode:0o600});fs.renameSync(temporary,filename);
   save(job);jobs.set(job.id,job);if(!input.scheduledAt)void execute(job);return job;
 }
+let lastCleanup=0;
 const scheduler = setInterval(() => {
   if (current || exportsInProgress.size) return;
+  if(Date.now()-lastCleanup>60000){try{cleanupArchives(ROOT);}catch(error){console.error('Limpeza de auditoria:',error.message);}lastCleanup=Date.now();}
   const next = [...jobs.values()].filter(j => j.status === 'scheduled' && Date.parse(j.scheduledAt) <= Date.now()).sort((a,b) => Date.parse(a.scheduledAt)-Date.parse(b.scheduledAt))[0];
   if (next) void execute(next);
 }, 1000);
@@ -106,7 +109,7 @@ const server = http.createServer(async (req,res) => {
     if (req.method === 'POST' && ((req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) || req.headers['content-type']?.split(';')[0] !== 'application/json')) return json(res,403,{error:'Origem ou tipo de conteúdo inválido'});
     const url = new URL(req.url, 'http://localhost');
     if(url.pathname==='/api/validate' && req.method==='POST') {
-      const config=validate(await body(req));return json(res,200,{valid:true,schemaVersion:2,steps:require('./lib/templates').countRequests(config.collection.item),durationSec:config.stages.reduce((n,s)=>n+s.durationSec,0),evidence:config.evidence});
+      const config=validate(await body(req));return json(res,200,{valid:true,schemaVersion:config.schemaVersion,steps:require('./lib/templates').countRequests(config.collection.item),durationSec:config.stages.reduce((n,s)=>n+s.durationSec,0),evidence:config.evidence});
     }
     if(url.pathname==='/api/runs/check' && req.method==='POST') {
       const input=await body(req);
@@ -134,7 +137,7 @@ const server = http.createServer(async (req,res) => {
       if(!Number.isInteger(page)||page<1||!Number.isInteger(pageSize)||pageSize<1||pageSize>100)return json(res,400,{error:'Paginação inválida.'});
       const search=(url.searchParams.get('q') || '').toLocaleLowerCase('pt-BR'),status=url.searchParams.get('status');
       const filtered=all.filter(j=>j.name.toLocaleLowerCase('pt-BR').includes(search) && (!status || j.status===status || outcome(j)===status));
-      return json(res,200,{schemaVersion:2,page,pageSize,total:filtered.length,overview:{total:all.length,completed:all.filter(j=>j.status==='completed').length,scheduled:all.filter(j=>j.status==='scheduled').length},items:filtered.slice((page-1)*pageSize,page*pageSize).map(job=>{const item=view(job);if(item.result)item.result={passed:item.result.passed,purpose:item.result.purpose,evaluation:item.result.evaluation?{verdict:item.result.evaluation.verdict}:undefined};return item;})});
+      return json(res,200,{schemaVersion:2,page,pageSize,total:filtered.length,overview:{busy:Boolean(current || exportsInProgress.size),total:all.length,completed:all.filter(j=>j.status==='completed').length,scheduled:all.filter(j=>j.status==='scheduled').length},items:filtered.slice((page-1)*pageSize,page*pageSize).map(job=>{const item=view(job);if(item.result)item.result={passed:item.result.passed,purpose:item.result.purpose,evaluation:item.result.evaluation?{verdict:item.result.evaluation.verdict}:undefined};return item;})});
     }
     if (url.pathname === '/api/runs' && req.method === 'POST') {
       return json(res,201,view(launch(await body(req))));
@@ -144,7 +147,12 @@ const server = http.createServer(async (req,res) => {
     const match = url.pathname.match(/^\/api\/runs\/([a-f0-9-]+)\/(cancel|xlsx|repeat|series|regenerate)$/);
     if (match) {
       const job = jobs.get(match[1]); if (!job) return json(res,404,{error:'Teste não encontrado'});
-      if(match[2]==='series' && req.method==='GET')return json(res,200,await series(job));
+      if(match[2]==='series' && req.method==='GET'){
+        const data=await series(job),from=url.searchParams.get('from');
+        if(from!==null && !Number.isFinite(Number(from)))return json(res,400,{error:'Cursor temporal inválido'});
+        const interval=data.points?.[0]?.duration || 1,reset=Number(url.searchParams.get('interval') || interval)!==interval;
+        return json(res,200,{...data,interval,reset,points:from!==null&&!reset?data.points.filter(p=>p.ts>=Number(from)):data.points});
+      }
       if(match[2]==='regenerate' && req.method==='POST')return json(res,200,await regenerate(job));
       if(match[2]==='repeat' && req.method==='POST') {
         if(!['completed','cancelled','failed'].includes(job.status))return json(res,409,{error:'Aguarde o teste terminar antes de repetir.'});
