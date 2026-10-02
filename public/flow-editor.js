@@ -565,13 +565,13 @@ window.FlowEditor = class FlowEditor {
         this.fieldHelp(
           parent,
           [url],
-          `Esta requisição roda uma vez para cada item de ${loop.variable || 'sua coleção'}. O loop cria ITEM automaticamente com o item atual: use {{ITEM.id}} para seu ID ou {{ITEM}} se a lista contiver apenas valores. Exemplo: /api/itens/{{ITEM.id}}. {{INDEX}} é a posição do item, começando em 0. Essas variáveis ficam disponíveis nos passos dentro da repetição.`
+          `A URL aceita variáveis iniciais ou extraídas, como {{BASE_URL}}. Esta requisição roda uma vez para cada item de ${loop.variable || 'sua coleção'}. O loop cria ITEM automaticamente com o item atual: use {{ITEM.id}} para seu ID ou {{ITEM}} se a lista contiver apenas valores. Exemplo: {{BASE_URL}}/api/itens/{{ITEM.id}}. {{INDEX}} é a posição do item, começando em 0. Essas variáveis ficam disponíveis nos passos dentro da repetição.`
         )
       else
         this.fieldHelp(
           parent,
           [url],
-          'Para usar uma variável salva por uma requisição anterior, escreva seu nome entre chaves duplas, como {{TOKEN}}. Cada usuário mantém seus próprios valores.'
+          'A URL aceita variáveis iniciais ou salvas por extrações anteriores. Escreva o nome entre chaves duplas, como {{BASE_URL}}/api/usuarios/{{USER_ID}}. Você também pode usar variáveis nos parâmetros: {{BASE_URL}}/api/usuarios?status={{STATUS}}. Cada usuário mantém seus próprios valores.'
         )
       const header = {
         headers: (n.headers || [])
@@ -579,6 +579,11 @@ window.FlowEditor = class FlowEditor {
           .join('\n'),
       }
       const h = this.field(parent, header, 'headers', 'Headers', 'textarea')
+      this.fieldHelp(
+        parent,
+        [h],
+        'Informe um header por linha, no formato Nome: valor. Os valores aceitam variáveis entre chaves duplas, como Authorization: Bearer {{TOKEN}} ou X-User-Id: {{USER_ID}}. Use uma variável inicial ou salva por uma extração anterior. Nos passos dentro de uma repetição de itens, você também pode usar {{ITEM.id}} e {{INDEX}}. O nome do header deve ser fixo.'
+      )
       h.oninput = () => {
         this.checkpoint()
         n.invalidHeaders = h.value
@@ -603,7 +608,12 @@ window.FlowEditor = class FlowEditor {
         ['text', 'Texto'],
         ['form', 'Formulário (a=b&c=d)'],
       ])
-      this.field(parent, n, 'body', 'Corpo', 'textarea')
+      const body = this.field(parent, n, 'body', 'Corpo', 'textarea')
+      this.fieldHelp(
+        parent,
+        [body],
+        'O corpo aceita variáveis entre chaves duplas nos tipos JSON, Texto e Formulário. Use uma variável inicial ou salva por uma extração anterior, como {{USER_ID}}. Em JSON, use {"id": {{USER_ID}}, "nome": "{{NOME}}"}: fora das aspas o valor mantém seu tipo; dentro das aspas vira texto. Em Texto, por exemplo: Olá, {{NOME}}. Em Formulário: id={{USER_ID}}&nome={{NOME}}. Dentro de uma repetição de itens, use {{ITEM.id}} para o ID atual e {{INDEX}} para a posição. Com Sem corpo, este campo não é enviado.'
+      )
       this.field(parent, n, 'expectedStatus', 'Status esperado', 'number')
       this.field(parent, n, 'contains', 'Resposta contém')
       const simple = {
@@ -730,7 +740,17 @@ window.FlowEditor = class FlowEditor {
   }
   condition(parent, n) {
     n.condition ||= { variable: '', operator: 'exists' }
-    this.field(parent, n.condition, 'variable', 'Variável da condição')
+    const variable = this.field(
+      parent,
+      n.condition,
+      'variable',
+      'Variável da condição'
+    )
+    this.fieldHelp(
+      parent,
+      [variable],
+      'Informe o nome da variável a comparar, sem chaves duplas, como STATUS. Você pode acessar um campo com pontos, como USUARIO.id. Dentro de uma repetição de itens, ITEM.id representa o ID do item atual e INDEX sua posição. O valor da comparação é um valor JSON fixo, como 200 ou "ativo".'
+    )
     this.field(
       parent,
       n.condition,
