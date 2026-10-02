@@ -2979,8 +2979,12 @@ body.mobile-layout .creation-steps {
 }
 .flow-insert button {
   position: relative;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   border-radius: 50%;
   font-size: 21px;
