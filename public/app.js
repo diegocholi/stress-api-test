@@ -329,12 +329,12 @@ function updateRequests() {
   })
   $('request-count').textContent = count + ' REQUISIÇÕES'
 }
-function addRequest(step) {
+function addRequest(step, configure = true) {
   if (step && Object.keys(step).length) {
     const flow = flowEditor.value()
     flow.steps.push(step)
     flowEditor.load(flow)
-  } else flowEditor.add('request')
+  } else flowEditor.add('request', undefined, undefined, { configure })
   updateRequests()
 }
 function pairs(value, separator, label) {
@@ -441,7 +441,7 @@ $('add-request').onclick = () => {
   addRequest()
   markDirty()
 }
-addRequest()
+addRequest(undefined, false)
 setMode('builder')
 
 async function api(url, data) {
@@ -676,7 +676,7 @@ function resetEditor() {
   loadedTemplate = null
 
   flowEditor.load()
-  addRequest()
+  addRequest(undefined, false)
   if ($('form').dataset.createPage !== undefined) createPage(0)
   stages.replaceChildren()
   addStage()

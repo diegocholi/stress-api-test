@@ -8,7 +8,8 @@ window.FlowEditor = class FlowEditor {
     this.selected = null
     this.history = []
     this.future = []
-    this.view = 'list'
+    this.view = 'graph'
+    this.inspectorOpen = false
     this.zoom = 1
     const bar = document.createElement('div')
     bar.className = 'flow-toolbar'
@@ -62,6 +63,7 @@ window.FlowEditor = class FlowEditor {
     })
     this.layout.after(controls)
     bar.querySelector('#flow-phase').onchange = (e) => {
+      this.closeInspector(false, false)
       this.phase = e.target.value
       this.selected = null
       this.render()
@@ -120,8 +122,10 @@ window.FlowEditor = class FlowEditor {
     this.buttons()
     if (this.view === 'graph') {
       const node = this.find(this.selected)
-      const heading = this.root.querySelector('.flow-inspector-card h3')
-      const path = this.root.querySelector('.flow-location')
+      const heading = this.inspectorDialog?.querySelector(
+        '.flow-inspector-card h3'
+      )
+      const path = this.inspectorDialog?.querySelector('.flow-location')
       if (node && heading) heading.textContent = node.name || 'Configurar bloco'
       if (node && path)
         path.textContent =
@@ -149,6 +153,7 @@ window.FlowEditor = class FlowEditor {
     this.changed()
   }
   load(scenario = {}) {
+    this.closeInspector(false, false)
     this.flow = structuredClone({
       ...scenario,
       steps: scenario.steps || [],
@@ -223,7 +228,12 @@ window.FlowEditor = class FlowEditor {
   value() {
     return structuredClone(this.flow)
   }
-  add(type = 'request', target, index = target?.length) {
+  add(
+    type = 'request',
+    target,
+    index = target?.length,
+    { configure = true } = {}
+  ) {
     if (this.view === 'graph') {
       const destination = this.destinations().find(
         (entry) => entry.nodes === (target || this.flow[this.phase])
@@ -281,7 +291,7 @@ window.FlowEditor = class FlowEditor {
     this.selected = node.id
     this.render()
     this.changed()
-    if (this.view === 'graph') this.focusNode(node.id)
+    if (this.view === 'graph' && configure) this.openInspector()
     return node
   }
   select(id) {
@@ -295,8 +305,10 @@ window.FlowEditor = class FlowEditor {
     }
     this.bar.querySelector('select').value = this.phase
     this.render()
+    if (this.view === 'graph') this.openInspector()
   }
   setView(view) {
+    this.closeInspector(false, false)
     this.view = view
     this.render()
     if (view === 'graph') this.fit()
@@ -409,8 +421,10 @@ window.FlowEditor = class FlowEditor {
           }
       }
     }
-    if (this.view === 'graph') this.renderInspector()
-    else draw(this.flow[this.phase], this.root)
+    if (this.view === 'graph') {
+      if (this.inspectorOpen) this.renderInspector()
+    } else draw(this.flow[this.phase], this.root)
+    this.root.hidden = this.view === 'graph'
     this.controls.hidden = this.view === 'graph'
     this.graphPanel.hidden = this.view !== 'graph'
     this.root.classList.toggle('graph-inspector', this.view === 'graph')
@@ -845,6 +859,7 @@ window.FlowEditor = class FlowEditor {
     )
     if (!this.canMove(id, current, index)) return false
     const source = this.locate(id)
+    this.closeInspector(false, false)
     this.checkpoint()
     const [node] = source.nodes.splice(source.index, 1)
     if (source.nodes === current.nodes && source.index < index) index--
@@ -858,12 +873,12 @@ window.FlowEditor = class FlowEditor {
     )
     return true
   }
-  focusNode(id) {
+  focusNode(id, scroll = true) {
     const button = [...this.canvas.querySelectorAll('.flow-node')].find(
       (element) => element.dataset.nodeId === id
     )
     button?.focus({ preventScroll: true })
-    button?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    if (scroll) button?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }
   describe(node) {
     if (node.type === 'request')
@@ -894,16 +909,75 @@ window.FlowEditor = class FlowEditor {
           : `Repetir ${node.limit ?? 10} vezes`
     return `${node.children?.length || 0} passos agrupados`
   }
+  openInspector() {
+    this.inspectorOpen = true
+    this.renderInspector()
+  }
+  closeInspector(restoreFocus = true, animate = true) {
+    const dialog = this.inspectorDialog
+    if (!dialog) return
+    this.inspectorOpen = false
+    const id = this.selected
+    const finish = () => {
+      if (this.inspectorDialog !== dialog) return
+      clearTimeout(this.inspectorCloseTimer)
+      this.inspectorDialog = null
+      dialog.close()
+      dialog.remove()
+      if (restoreFocus) {
+        if (this.find(id)) this.focusNode(id, false)
+        else
+          this.canvas
+            .querySelector('.flow-insert button')
+            ?.focus({ preventScroll: true })
+      }
+    }
+    if (animate && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      dialog.classList.add('closing')
+      clearTimeout(this.inspectorCloseTimer)
+      this.inspectorCloseTimer = setTimeout(finish, 180)
+    } else finish()
+  }
   renderInspector() {
     const node = this.find(this.selected)
     if (!node || !this.locate(node.id)) {
-      const empty = document.createElement('div')
-      empty.className = 'flow-inspector-empty'
-      empty.innerHTML =
-        '<strong>Configure um bloco</strong><p>Selecione um bloco no fluxograma para editar seus detalhes. Para começar, use o + no ponto em que deseja inserir um passo.</p>'
-      this.root.append(empty)
+      this.closeInspector(false, false)
       return
     }
+    let dialog = this.inspectorDialog
+    if (!dialog) {
+      dialog = document.createElement('dialog')
+      dialog.className = 'flow-config-dialog'
+      dialog.setAttribute('aria-labelledby', 'flow-config-title')
+      dialog.setAttribute('aria-describedby', 'flow-config-save-hint')
+      dialog.addEventListener('cancel', (event) => {
+        event.preventDefault()
+        this.closeInspector()
+      })
+      let backdropPress = false
+      const outside = (event) => {
+        const rect = dialog.getBoundingClientRect()
+        return (
+          event.target === dialog &&
+          (event.clientX < rect.left ||
+            event.clientX > rect.right ||
+            event.clientY < rect.top ||
+            event.clientY > rect.bottom)
+        )
+      }
+      dialog.addEventListener('pointerdown', (event) => {
+        backdropPress = outside(event)
+      })
+      dialog.addEventListener('click', (event) => {
+        if (backdropPress && outside(event)) this.closeInspector()
+        backdropPress = false
+      })
+      document.body.append(dialog)
+      this.inspectorDialog = dialog
+    }
+    clearTimeout(this.inspectorCloseTimer)
+    dialog.classList.remove('closing')
+    dialog.replaceChildren()
     const location = this.destinations().find((entry) =>
       entry.nodes.includes(node)
     )
@@ -912,6 +986,7 @@ window.FlowEditor = class FlowEditor {
     card.dataset.nodeId = node.id
     card.setAttribute('open', '')
     const heading = document.createElement('h3')
+    heading.id = 'flow-config-title'
     heading.textContent = node.name || 'Configurar bloco'
     const path = document.createElement('p')
     path.className = 'flow-location'
@@ -932,6 +1007,7 @@ window.FlowEditor = class FlowEditor {
         const loc = this.locate(node.id)
         if (action === 'remove') {
           loc.nodes.splice(loc.index, 1)
+          this.closeInspector(false, false)
           this.selected =
             loc.nodes[Math.min(loc.index, loc.nodes.length - 1)]?.id || null
         } else {
@@ -942,8 +1018,8 @@ window.FlowEditor = class FlowEditor {
         }
         this.render()
         this.changed()
-        if (this.selected) this.focusNode(this.selected)
-        else
+        if (this.selected && !this.inspectorOpen) this.focusNode(this.selected)
+        else if (!this.selected)
           this.canvas
             .querySelector('.flow-insert button')
             ?.focus({ preventScroll: true })
@@ -955,7 +1031,24 @@ window.FlowEditor = class FlowEditor {
       }
       actions.append(button)
     }
-    card.append(heading, path, actions)
+    const header = document.createElement('div')
+    header.className = 'flow-config-header'
+    const close = document.createElement('button')
+    close.type = 'button'
+    close.className = 'flow-config-close'
+    close.setAttribute('aria-label', 'Fechar configurações')
+    close.innerHTML =
+      '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M18 6 6 18" /></svg>'
+    close.onclick = () => this.closeInspector()
+    const hint = document.createElement('p')
+    hint.id = 'flow-config-save-hint'
+    hint.className = 'flow-config-save-hint'
+    hint.textContent = 'Alterações salvas automaticamente no cenário atual.'
+    const title = document.createElement('div')
+    title.className = 'flow-config-title'
+    title.append(heading, hint)
+    header.append(title, close)
+    card.append(header, path, actions)
     if (['loop', 'condition', 'group'].includes(node.type)) {
       const help = document.createElement('p')
       help.className = 'flow-context-help'
@@ -970,8 +1063,13 @@ window.FlowEditor = class FlowEditor {
     const body = document.createElement('div')
     body.className = 'request-body'
     this.inspect(node, body)
+    body.addEventListener('input', () =>
+      this.root.dispatchEvent(new Event('input', { bubbles: true }))
+    )
     card.append(body)
-    this.root.append(card)
+    dialog.append(card)
+    if (!dialog.open) dialog.showModal()
+    dialog.querySelector('[data-field=name]')?.focus({ preventScroll: true })
   }
   closeMenu(restoreFocus = true) {
     if (!this.menu) return
@@ -1328,6 +1426,7 @@ window.FlowEditor = class FlowEditor {
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'flow-node'
+        button.setAttribute('aria-haspopup', 'dialog')
         button.dataset.nodeId = node.id
         button.dataset.selected = String(node.id === this.selected)
         button.dataset.focusKey = `node:${node.id}`
@@ -1348,7 +1447,6 @@ window.FlowEditor = class FlowEditor {
         button.append(badge, name, summary)
         button.onclick = () => {
           this.select(node.id)
-          this.focusNode(node.id)
         }
         header.append(handle, button)
         block.append(header)

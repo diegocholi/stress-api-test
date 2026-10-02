@@ -2587,26 +2587,7 @@ body[data-view='configure'] main {
   }
 }
 .flow-layout[data-view='graph'] {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
-  gap: 18px;
-  align-items: start;
-}
-.flow-layout[data-view='graph'] .graph-inspector {
-  min-width: 0;
-  max-height: 680px;
-  overflow: auto;
-}
-.flow-layout[data-view='graph'] .flow-nested {
-  padding: 0;
-}
-@media (max-width: 850px) {
-  .flow-layout[data-view='graph'] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .flow-layout[data-view='graph'] .graph-inspector {
-    max-height: none;
-  }
+  display: block;
 }
 .result-flow-graph {
   border-left: 2px solid #71855f;
@@ -3151,4 +3132,134 @@ body.mobile-layout .creation-steps {
 }
 body.editing-graph #add-request {
   display: none;
+}
+
+.flow-config-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+.flow-config-dialog[open] {
+  animation: flow-config-in 180ms ease-out;
+}
+.flow-config-dialog::backdrop {
+  background: #0009;
+  animation: flow-backdrop-in 180ms ease-out;
+}
+.flow-config-dialog.closing {
+  animation: flow-config-out 180ms ease-in forwards;
+}
+.flow-config-dialog.closing::backdrop {
+  animation: flow-backdrop-out 180ms ease-in forwards;
+}
+.flow-config-dialog .flow-inspector-card {
+  border: 0;
+}
+.flow-config-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -16px -16px 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.flow-config-title {
+  flex: 1;
+  min-width: 0;
+}
+.flow-config-header h3 {
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.flow-config-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+.flow-config-close:hover {
+  background: var(--input);
+  border-color: var(--border);
+  color: var(--text);
+}
+.flow-config-close svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.flow-config-save-hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.flow-config-dialog .request-body {
+  min-width: 0;
+}
+@keyframes flow-config-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes flow-config-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes flow-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes flow-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-config-dialog[open],
+  .flow-config-dialog.closing,
+  .flow-config-dialog::backdrop,
+  .flow-config-dialog.closing::backdrop {
+    animation: none;
+  }
 }

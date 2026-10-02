@@ -18,6 +18,7 @@ test.afterAll(async () => {
 })
 async function configure(page, name = 'Health navegador') {
   await page.goto('/#configure')
+  await page.locator('#flow-list').click()
   await page.locator('[name=name]').fill(name)
   await page.locator('[data-field=url]').fill(url)
   await page.getByRole('button', { name: '2 · Carga', exact: true }).click()
@@ -80,6 +81,7 @@ test('simple rules survive repeated saves without creating additional rules', as
   const extracts = page.locator('fieldset[data-field=extracts] .flow-rule')
   const reloadSaved = async () => {
     await page.reload()
+    await page.locator('#flow-list').click()
     await page.getByRole('link', { name: /Testes salvos/ }).click()
     await page
       .getByRole('button', { name: `Carregar ${name}`, exact: true })
@@ -185,6 +187,7 @@ test('additional token extractions remain visible after saving and reloading', a
     ).json()
     expect(detail.definition.scenario.steps[0].extracts).toEqual(rules)
     await page.reload()
+    await page.locator('#flow-list').click()
     await page.getByRole('link', { name: /Testes salvos/ }).click()
     await page
       .getByRole('button', { name: `Carregar ${name}`, exact: true })
@@ -454,6 +457,7 @@ test('primary navigation preserves the editor, handles history and falls back fo
   page,
 }) => {
   await page.goto('/')
+  await page.locator('#flow-list').click()
   await expect(page.locator('.nav-link[aria-current="page"]')).toHaveText(
     /Configurar teste/
   )
@@ -533,6 +537,7 @@ test('mobile menu supports keyboard dismissal, selection and all destinations wi
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
+  await page.locator('#flow-list').click()
   const toggle = page.getByRole('button', { name: 'Menu', exact: true })
   await toggle.click()
   await expect(
@@ -598,6 +603,10 @@ test('dragged loop saves, reloads and executes the moved request twice', async (
     .click()
   await page.locator('[data-create-kind=loop]').click()
   await page.locator('[data-field=limit]').fill('2')
+  await page
+    .getByRole('button', { name: 'Fechar configurações', exact: true })
+    .click()
+  await expect(page.locator('.flow-config-dialog')).toHaveCount(0)
   await page.locator('[data-graph-fit]').click()
   await page.locator('#flow-canvas').scrollIntoViewIfNeeded()
   const start = await page
@@ -622,6 +631,11 @@ test('dragged loop saves, reloads and executes the moved request twice', async (
     .getByRole('button', { name: `Carregar ${name}`, exact: true })
     .click()
   await expect(page.locator('#message')).toContainText('Teste carregado')
+  await expect(page.locator('#flow-graph')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await expect(page.locator('.flow-config-dialog')).toHaveCount(0)
   const saved = await page.evaluate(() => flowEditor.value())
   expect(saved.steps).toHaveLength(1)
   expect(saved.steps[0].limit).toBe(2)

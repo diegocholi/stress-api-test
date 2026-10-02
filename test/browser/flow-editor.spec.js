@@ -21,7 +21,16 @@ async function openGraph(page, steps) {
 const block = (page, id) => page.locator(`.flow-block[data-node-id="${id}"]`)
 const rootSlot = (page, index) =>
   page.locator(`.flow-graph-tree > .flow-insert[data-position="${index}"]`)
+async function closeConfig(page) {
+  if (await page.locator('.flow-config-dialog').count()) {
+    await page
+      .getByRole('button', { name: 'Fechar configurações', exact: true })
+      .click()
+    await expect(page.locator('.flow-config-dialog')).toHaveCount(0)
+  }
+}
 async function drag(page, source, destination, cancel = false) {
+  await closeConfig(page)
   await page.locator('#flow-canvas').scrollIntoViewIfNeeded()
   const start = await source.boundingBox()
   const end = await destination.boundingBox()
@@ -59,7 +68,12 @@ test('graph creates at the chosen point and moves a configured request into and 
   expect(flow.steps).toHaveLength(1)
   expect(flow.steps[0].children[0]).toEqual(configured)
   await expect(page.locator('.flow-feedback')).toContainText('movido')
+  await block(page, 'http')
+    .locator(':scope > .flow-block-head > .flow-node')
+    .click()
   await expect(page.locator('[data-field=url]')).toHaveValue(original.url)
+  await closeConfig(page)
+  await closeConfig(page)
   await page.locator('#flow-undo').click()
   expect((await value(page)).steps.map((node) => node.id)).toEqual([
     'http',
@@ -82,6 +96,7 @@ test('graph creates at the chosen point and moves a configured request into and 
     'pause',
     'request',
   ])
+  await closeConfig(page)
   await page.locator('#flow-list').click()
   await expect(page.locator('#flow-kind')).toBeVisible()
   await expect(page.locator('#add-request')).toBeVisible()
@@ -148,6 +163,7 @@ test('graph moves an entire group between condition branches, reorders and block
     'group',
     'pause',
   ])
+  await closeConfig(page)
   await page.locator('#flow-undo').click()
   expect((await value(page)).steps[0].else[0].children[0].id).toBe('child')
   await page.locator('#flow-redo').click()
@@ -205,10 +221,12 @@ test('graph cancels drag and menus, preserves focus and supports keyboard creati
   const falsePlus = page.locator(
     '[data-flow-container=else] > .flow-insert button'
   )
+  await closeConfig(page)
   await falsePlus.click()
   await page.locator('[data-create-kind=request]').click()
   expect((await value(page)).setup[0].else[0].type).toBe('request')
   await page.locator('[data-field=name]').fill('Nome longo '.repeat(12))
+  await closeConfig(page)
   await page.locator('[data-graph-fit]').click()
   expect(await page.evaluate(() => flowEditor.zoom)).toBeGreaterThanOrEqual(0.2)
   await page.evaluate(() => window.scrollTo(0, 0))
@@ -267,6 +285,7 @@ test('graph enforces depth and rejects invalid drops without history or data los
   })
   expect(result).toBe(true)
   expect((await value(page)).steps).toHaveLength(2)
+  await closeConfig(page)
   await page.locator('#flow-undo').click()
   expect(await value(page)).toEqual(before)
 })
@@ -421,11 +440,155 @@ test('graph duplicates a subtree with new identities and removes it with undo', 
   })
   await expect(
     block(page, copy.id).locator(':scope > .flow-block-head > .flow-node')
+  ).toHaveAttribute('data-selected', 'true')
+  await expect(
+    page.locator('.flow-config-dialog [data-field=name]')
   ).toBeFocused()
   await page.getByRole('button', { name: 'Remover', exact: true }).click()
   expect((await value(page)).steps).toEqual([original])
+  await closeConfig(page)
   await page.locator('#flow-undo').click()
   expect((await value(page)).steps).toEqual([original, copy])
   await page.locator('#flow-redo').click()
   expect((await value(page)).steps).toEqual([original])
+})
+
+test('graph is the default and modal edits survive every close action without saving to the library', async ({
+  page,
+}) => {
+  await page.goto('/#configure')
+  await expect(page.locator('#flow-graph')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await expect(page.locator('#requests')).toBeHidden()
+  await expect(page.locator('.flow-config-dialog')).toHaveCount(0)
+  await page.evaluate(
+    (http) =>
+      flowEditor.load({
+        steps: [
+          {
+            id: 'group',
+            type: 'group',
+            name: 'Grupo',
+            children: [http],
+          },
+          { id: 'pause', type: 'pause', name: 'Pausa', ms: 100 },
+          {
+            id: 'loop',
+            type: 'loop',
+            name: 'Loop',
+            mode: 'count',
+            limit: 2,
+            children: [],
+          },
+          {
+            id: 'condition',
+            type: 'condition',
+            name: 'Condição',
+            condition: { variable: 'FLAG', operator: 'exists' },
+            then: [],
+            else: [],
+          },
+        ],
+      }),
+    request('http')
+  )
+  await expect(page.locator('.flow-config-dialog')).toHaveCount(0)
+  await page.locator('[data-graph-zoom]').fill('70')
+  const saves = []
+  page.on('request', (req) => {
+    if (req.method() !== 'GET' && req.url().includes('/api/templates'))
+      saves.push(req.url())
+  })
+  for (const [index, id] of [
+    'http',
+    'pause',
+    'loop',
+    'condition',
+    'group',
+  ].entries()) {
+    await block(page, id)
+      .locator(':scope > .flow-block-head > .flow-node')
+      .click()
+    const dialog = page.locator('.flow-config-dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('[data-field=name]')).toBeFocused()
+    await dialog.locator('[data-field=name]').fill(`Editado ${id}`)
+    if (index === 0) {
+      await dialog.evaluate(async (el) => {
+        await Promise.all(
+          el.getAnimations().map((animation) => animation.finished)
+        )
+      })
+      await page.screenshot({ path: 'test-results/flow-config-desktop.png' })
+    }
+    const history = await page.evaluate(() => flowEditor.history.length)
+    if (index % 3 === 0) await closeConfig(page)
+    else if (index % 3 === 1) await page.keyboard.press('Escape')
+    else await page.mouse.click(2, 2)
+    await expect(dialog).toHaveCount(0)
+    await expect(
+      block(page, id).locator(':scope > .flow-block-head > .flow-node')
+    ).toBeFocused()
+    expect(await page.evaluate(() => flowEditor.history.length)).toBe(history)
+    await block(page, id)
+      .locator(':scope > .flow-block-head > .flow-node')
+      .click()
+    await expect(dialog.locator('[data-field=name]')).toHaveValue(
+      `Editado ${id}`
+    )
+    await closeConfig(page)
+  }
+  expect(saves).toEqual([])
+  expect(await page.evaluate(() => flowEditor.zoom)).toBe(0.7)
+  await page.locator('#flow-undo').click()
+  expect((await value(page)).steps[0].name).toBe('Grupo')
+  await page.locator('#flow-redo').click()
+  expect((await value(page)).steps[0].name).toBe('Editado group')
+  await page.reload()
+  await expect(page.locator('#flow-graph')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await expect(page.locator('.flow-config-dialog')).toHaveCount(0)
+})
+
+test('configuration modal supports keyboard, small screens, reduced motion and validation focus', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 740 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await openGraph(page, [request('http')])
+  const node = block(page, 'http').locator('.flow-node')
+  await node.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.locator('.flow-config-dialog')
+  await expect(dialog.locator('[data-field=name]')).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  expect(
+    await page.evaluate(() =>
+      document
+        .querySelector('.flow-config-dialog')
+        .contains(document.activeElement)
+    )
+  ).toBe(true)
+  const bounds = await dialog.boundingBox()
+  expect(bounds.x).toBeGreaterThanOrEqual(0)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
+  expect(bounds.height).toBeLessThanOrEqual(740)
+  expect(
+    await dialog.evaluate((el) => getComputedStyle(el).animationName)
+  ).toBe('none')
+  await dialog.locator('[data-field=url]').fill('{{MISSING}}/x')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await page.evaluate(() =>
+    showError({ message: 'URL inválida', nodeId: 'http', field: 'url' })
+  )
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-field=url]')).toBeFocused()
+  await expect(dialog.locator('[data-field=url]')).toHaveValue('{{MISSING}}/x')
+  await page.screenshot({ path: 'test-results/flow-config-mobile.png' })
+  await closeConfig(page)
 })
