@@ -1,46 +1,706 @@
 /* A structured tree is shared by the accessible list, graph and inspector. */
-window.FlowEditor=class FlowEditor {
-  constructor(root,onChange){this.root=root;this.onChange=onChange;this.flow={steps:[],setup:[],perUser:[],teardown:[]};this.phase='steps';this.selected=null;this.history=[];this.future=[];this.view='list';this.zoom=1;
-    const bar=document.createElement('div');bar.className='flow-toolbar';bar.innerHTML='<label>Fase<select id="flow-phase"><option value="steps">Jornada</option><option value="setup">Preparação global</option><option value="perUser">Preparação por usuário</option><option value="teardown">Limpeza global</option></select></label><div class="flow-view"><button type="button" id="flow-list">Lista</button><button type="button" id="flow-graph">Fluxograma</button></div><button type="button" id="flow-undo" aria-label="Desfazer">↶</button><button type="button" id="flow-redo" aria-label="Refazer">↷</button>';
-    root.before(bar);this.bar=bar;this.canvas=document.createElement('div');this.canvas.id='flow-canvas';this.canvas.className='flow-canvas';this.canvas.hidden=true;root.after(this.canvas);
-    const controls=document.createElement('div');controls.className='flow-add-controls';controls.innerHTML='<label>Tipo de bloco<select id="flow-kind"><option value="request">Requisição HTTP</option><option value="condition">Condição</option><option value="loop">Repetição</option><option value="pause">Pausa</option><option value="group">Grupo / transação</option></select></label><button type="button" id="flow-add">Adicionar bloco</button><button type="button" id="flow-fit">Ajustar fluxograma</button><label>Zoom<input id="flow-zoom" type="range" min="50" max="150" value="100"></label>';
-    this.canvas.after(controls);this.controls=controls;this.layout=document.createElement('div');this.layout.className='flow-layout';this.bar.after(this.layout);this.layout.append(this.canvas,this.root);this.layout.after(controls);
-    bar.querySelector('#flow-phase').onchange=e=>{this.phase=e.target.value;this.selected=null;this.render();};bar.querySelector('#flow-list').onclick=()=>this.setView('list');bar.querySelector('#flow-graph').onclick=()=>this.setView('graph');bar.querySelector('#flow-undo').onclick=()=>this.undo();bar.querySelector('#flow-redo').onclick=()=>this.redo();
-    controls.querySelector('#flow-add').onclick=()=>this.add(controls.querySelector('select').value);controls.querySelector('#flow-fit').onclick=()=>{this.zoom=1;controls.querySelector('input').value=100;this.draw();};controls.querySelector('input').oninput=e=>{this.zoom=e.target.value/100;this.draw();};
+window.FlowEditor = class FlowEditor {
+  constructor(root, onChange) {
+    this.root = root
+    this.onChange = onChange
+    this.flow = { steps: [], setup: [], perUser: [], teardown: [] }
+    this.phase = 'steps'
+    this.selected = null
+    this.history = []
+    this.future = []
+    this.view = 'list'
+    this.zoom = 1
+    const bar = document.createElement('div')
+    bar.className = 'flow-toolbar'
+    bar.innerHTML =
+      '<label>Fase<select id="flow-phase"><option value="steps">Jornada</option><option value="setup">Preparação global</option><option value="perUser">Preparação por usuário</option><option value="teardown">Limpeza global</option></select></label><div class="flow-view"><button type="button" id="flow-list">Lista</button><button type="button" id="flow-graph">Fluxograma</button></div><button type="button" id="flow-undo" aria-label="Desfazer">↶</button><button type="button" id="flow-redo" aria-label="Refazer">↷</button>'
+    root.before(bar)
+    this.bar = bar
+    this.canvas = document.createElement('div')
+    this.canvas.id = 'flow-canvas'
+    this.canvas.className = 'flow-canvas'
+    this.canvas.hidden = true
+    root.after(this.canvas)
+    const controls = document.createElement('div')
+    controls.className = 'flow-add-controls'
+    controls.innerHTML =
+      '<label>Tipo de bloco<select id="flow-kind"><option value="request">Requisição HTTP</option><option value="condition">Condição</option><option value="loop">Repetição</option><option value="pause">Pausa</option><option value="group">Grupo / transação</option></select></label><button type="button" id="flow-add">Adicionar bloco</button><button type="button" id="flow-fit">Ajustar fluxograma</button><label>Zoom<input id="flow-zoom" type="range" min="50" max="150" value="100"></label>'
+    this.canvas.after(controls)
+    this.controls = controls
+    this.layout = document.createElement('div')
+    this.layout.className = 'flow-layout'
+    this.bar.after(this.layout)
+    this.layout.append(this.canvas, this.root)
+    this.layout.after(controls)
+    bar.querySelector('#flow-phase').onchange = (e) => {
+      this.phase = e.target.value
+      this.selected = null
+      this.render()
+    }
+    bar.querySelector('#flow-list').onclick = () => this.setView('list')
+    bar.querySelector('#flow-graph').onclick = () => this.setView('graph')
+    bar.querySelector('#flow-undo').onclick = () => this.undo()
+    bar.querySelector('#flow-redo').onclick = () => this.redo()
+    controls.querySelector('#flow-add').onclick = () =>
+      this.add(controls.querySelector('select').value)
+    controls.querySelector('#flow-fit').onclick = () => {
+      this.zoom = 1
+      controls.querySelector('input').value = 100
+      this.draw()
+    }
+    controls.querySelector('input').oninput = (e) => {
+      this.zoom = e.target.value / 100
+      this.draw()
+    }
   }
-  id(){return crypto.randomUUID();}
-  walk(nodes,fn){for(const n of nodes){fn(n);for(const key of ['children','then','else'])if(n[key])this.walk(n[key],fn);}}
-  find(id){let found;for(const key of ['steps','setup','perUser','teardown'])this.walk(this.flow[key],n=>{if(n.id===id)found=n;});return found;}
-  locate(id,nodes=this.flow[this.phase]){for(let i=0;i<nodes.length;i++){if(nodes[i].id===id)return {nodes,index:i};for(const key of ['children','then','else'])if(nodes[i][key]){const found=this.locate(id,nodes[i][key]);if(found)return found;}}}
-  checkpoint(){this.history.push(JSON.stringify(this.flow));if(this.history.length>60)this.history.shift();this.future=[];}
-  changed(){this.onChange();this.buttons();this.draw();}
-  buttons(){this.bar.querySelector('#flow-undo').disabled=!this.history.length;this.bar.querySelector('#flow-redo').disabled=!this.future.length;}
-  undo(){if(!this.history.length)return;this.future.push(JSON.stringify(this.flow));this.flow=JSON.parse(this.history.pop());this.render();this.changed();}
-  redo(){if(!this.future.length)return;this.history.push(JSON.stringify(this.flow));this.flow=JSON.parse(this.future.pop());this.render();this.changed();}
-  load(scenario={}){this.flow=structuredClone({...scenario,steps:scenario.steps || [],setup:scenario.setup || [],perUser:scenario.perUser || [],teardown:scenario.teardown || []});for(const key of ['steps','setup','perUser','teardown'])this.walk(this.flow[key],n=>{n.id ||= this.id();n.type ||= 'request';n.checks ||= [];n.extracts ||= [];});this.history=[];this.future=[];this.selected=this.flow.steps[0]?.id;this.phase='steps';this.bar.querySelector('select').value='steps';this.render();}
-  value(){return structuredClone(this.flow);}
-  add(type='request',target){this.checkpoint();const node={id:this.id(),type,name:type==='request'?'Requisição':({condition:'Condição',loop:'Repetição',pause:'Pausa',group:'Transação'})[type],...(type==='request'?{method:'GET',url:'',headers:[],bodyType:'none',body:'',expectedStatus:200,checks:[],extracts:[]} :type==='pause'?{ms:1000}:type==='condition'?{condition:{variable:'',operator:'exists'},then:[],else:[]}:type==='loop'?{mode:'count',limit:10,children:[]}:{children:[]})};(target || this.flow[this.phase]).push(node);this.selected=node.id;this.render();this.changed();return node;}
-  select(id){this.selected=id;for(const phase of ['steps','setup','perUser','teardown']){let has=false;this.walk(this.flow[phase],n=>{if(n.id===id)has=true;});if(has)this.phase=phase;}this.bar.querySelector('select').value=this.phase;this.render();}
-  setView(view){this.view=view;this.render();}
-  render(){this.root.replaceChildren();const draw=(nodes,parent,depth=0)=>{for(const node of nodes){const card=document.createElement('details');card.className='request-card flow-card';card.dataset.nodeId=node.id;card.dataset.depth=depth;card.open=node.id===this.selected;const summary=document.createElement('summary');summary.className='request-head';const title=document.createElement('span');title.className='request-label';title.textContent=`${node.type==='request'?node.method+' ':''}${node.name || 'Passo'}`;summary.append(title);
-      const actions=document.createElement('span');actions.className='request-controls';for(const [label,action]of [['↑','up'],['↓','down'],['⧉','duplicate'],['×','remove']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.action=action;b.setAttribute('aria-label',({up:'Mover requisição para cima',down:'Mover requisição para baixo',duplicate:'Duplicar requisição',remove:'Remover requisição'})[action]);b.onclick=e=>{e.preventDefault();e.stopPropagation();this.checkpoint();const loc=this.locate(node.id);if(action==='remove'){loc.nodes.splice(loc.index,1);this.selected=null;}if(action==='up'&&loc.index>0)[loc.nodes[loc.index-1],loc.nodes[loc.index]]=[loc.nodes[loc.index],loc.nodes[loc.index-1]];if(action==='down'&&loc.index<loc.nodes.length-1)[loc.nodes[loc.index+1],loc.nodes[loc.index]]=[loc.nodes[loc.index],loc.nodes[loc.index+1]];if(action==='duplicate'){const copy=structuredClone(node);this.walk([copy],n=>n.id=this.id());loc.nodes.splice(loc.index+1,0,copy);this.selected=copy.id;}this.render();this.changed();};actions.append(b);}summary.append(actions);card.append(summary);
-      summary.onclick=e=>{if(e.target.closest('button'))return;e.preventDefault();if(this.selected===node.id){card.open=!card.open;return;}this.selected=node.id;this.render();};const body=document.createElement('div');body.className='request-body';if(node.id===this.selected)this.inspect(node,body);card.append(body);
-      parent.append(card);for(const key of ['children','then','else'])if(node[key]){const nested=document.createElement('div');nested.className='flow-nested';const label=document.createElement('strong');label.textContent=key==='then'?'Se verdadeiro':key==='else'?'Se falso':'Passos internos';const button=document.createElement('button');button.type='button';button.textContent='Adicionar ao '+label.textContent.toLowerCase();button.onclick=()=>this.add(this.controls.querySelector('select').value,node[key]);nested.append(label,button);draw(node[key],nested,depth+1);parent.append(nested);}}
-    };draw(this.flow[this.phase],this.root);this.root.classList.toggle('graph-inspector',this.view==='graph');this.canvas.hidden=this.view!=='graph';this.layout.dataset.view=this.view;document.body.classList.toggle('editing-graph',this.view==='graph');this.bar.querySelector('#flow-list').setAttribute('aria-pressed',String(this.view==='list'));this.bar.querySelector('#flow-graph').setAttribute('aria-pressed',String(this.view==='graph'));this.buttons();this.draw();}
-  field(parent,node,key,label,type='text',choices){const l=document.createElement('label');l.textContent=label;const el=document.createElement(choices?'select':type==='textarea'?'textarea':'input');el.dataset.field=key;if(choices)for(const [value,text]of choices){const o=document.createElement('option');o.value=value;o.textContent=text;el.append(o);}else if(type!=='textarea')el.type=type;el.value=node[key]??'';if(type==='textarea')el.rows=3;if(type==='number')el.min='0';el.oninput=()=>{this.checkpoint();node[key]=type==='number'?(el.value===''?undefined:Number(el.value)):el.value;this.changed();};l.append(el);parent.append(l);return el;}
-  inspect(n,parent){this.field(parent,n,'name',n.type==='request'?'Nome da requisição':'Nome do bloco');
-    if(n.type==='request'){
-      this.field(parent,n,'method','Método','text',['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(v=>[v,v]));this.field(parent,n,'url','URL');
-      const header={headers:(n.headers || []).map(h=>`${h.key}: ${h.value}`).join('\n')};const h=this.field(parent,header,'headers','Headers','textarea');h.oninput=()=>{this.checkpoint();n.invalidHeaders=h.value.split(/\r?\n/).filter(Boolean).some(line=>line.indexOf(':')<1);n.headers=h.value.split(/\r?\n/).filter(Boolean).map(line=>{const i=line.indexOf(':');return {key:line.slice(0,i).trim(),value:line.slice(i+1).trim()};});this.changed();};
-      this.field(parent,n,'bodyType','Tipo de corpo','text',[['none','Sem corpo'],['json','JSON'],['text','Texto'],['form','Formulário (a=b&c=d)']]);this.field(parent,n,'body','Corpo','textarea');this.field(parent,n,'expectedStatus','Status esperado','number');this.field(parent,n,'contains','Resposta contém');
-      const simple={jsonPath:n.jsonCheck?.path || '',jsonValue:n.jsonCheck?JSON.stringify(n.jsonCheck.value):'',extractPath:n.extract?.path || '',extractVariable:n.extract?.variable || ''};for(const [key,label]of [['jsonPath','Campo JSON'],['jsonValue','Valor esperado (JSON)'],['extractPath','Extrair campo JSON'],['extractVariable','Salvar na variável']]){const input=this.field(parent,simple,key,label);input.oninput=()=>{this.checkpoint();simple[key]=input.value;if(simple.jsonPath&&simple.jsonValue){try{n.jsonCheck={path:simple.jsonPath,value:JSON.parse(simple.jsonValue)};delete n.invalidJsonCheck;}catch{n.invalidJsonCheck=true;}}else delete n.jsonCheck;if(simple.extractPath||simple.extractVariable)n.extract={source:'json',path:simple.extractPath,variable:simple.extractVariable};else delete n.extract;this.changed();};}
-      this.ruleEditor(parent,n,'checks','Validações adicionais');this.ruleEditor(parent,n,'extracts','Extrações adicionais');this.field(parent,n,'timeout','Timeout próprio (ms; vazio usa o teste)','number');this.field(parent,n,'retries','Novas tentativas (0–5)','number');if(this.phase==='steps'){this.field(parent,n,'p95Limit','p95 máximo deste endpoint (ms)','number');this.field(parent,n,'endpointSamples','Amostra mínima do endpoint','number');}
-    }else if(n.type==='pause'){this.field(parent,n,'ms','Pausa mínima (ms)','number');this.field(parent,n,'maxMs','Pausa máxima opcional (ms)','number');}
-    else if(n.type==='loop'){const mode=this.field(parent,n,'mode','Repetir','text',[['count','Quantidade fixa'],['items','Itens de uma coleção'],['while','Enquanto condição verdadeira']]);const updateMode=mode.oninput;mode.oninput=()=>{updateMode();this.render();};this.field(parent,n,'limit','Limite obrigatório (1–1000)','number');if(n.mode==='items')this.field(parent,n,'variable','Variável da coleção');if(n.mode==='while')this.condition(parent,n);}
-    else if(n.type==='condition')this.condition(parent,n);
-    const help=document.createElement('small');help.textContent='Variáveis: {{TOKEN}}, {{ITEM.id}}, {{INDEX}}. O loop e cada usuário possuem seu próprio contexto.';parent.append(help);
+  id() {
+    return crypto.randomUUID()
   }
-  condition(parent,n){n.condition ||= {variable:'',operator:'exists'};this.field(parent,n.condition,'variable','Variável da condição');this.field(parent,n.condition,'operator','Comparação','text',['exists','equals','notEquals','contains','gt','gte','lt','lte'].map(v=>[v,({exists:'Existe',equals:'Igual',notEquals:'Diferente',contains:'Contém',gt:'Maior',gte:'Maior ou igual',lt:'Menor',lte:'Menor ou igual'})[v]]));const proxy={value:n.condition.value===undefined?'':JSON.stringify(n.condition.value)};const input=this.field(parent,proxy,'conditionValue','Valor da comparação (JSON)');input.value=proxy.value;input.oninput=()=>{this.checkpoint();try{n.condition.value=input.value?JSON.parse(input.value):undefined;delete n.invalidCondition;}catch{n.invalidCondition=true;}this.changed();};}
-  ruleEditor(parent,node,key,label){const box=document.createElement('fieldset');const legend=document.createElement('legend');legend.textContent=label;box.dataset.field=key;box.tabIndex=-1;box.append(legend);node[key] ||= [];const paint=()=>{box.querySelectorAll('.flow-rule').forEach(el=>el.remove());for(const rule of node[key]){const row=document.createElement('div');row.className='flow-rule';this.field(row,rule,'source','Origem','text',(key==='checks'?['status','json','text','header','cookie']:['json','header','cookie']).map(v=>[v,v]));this.field(row,rule,'path','Campo / header');if(key==='checks'){this.field(row,rule,'operator','Operador','text',['equals','notEquals','contains','exists','gt','gte','lt','lte'].map(v=>[v,v]));const proxy={value:JSON.stringify(rule.value)};const input=this.field(row,proxy,'value','Valor (JSON)');input.oninput=()=>{this.checkpoint();try{rule.value=JSON.parse(input.value);delete rule.invalid;}catch{rule.invalid=true;}this.changed();};}else{this.field(row,rule,'variable','Salvar na variável');this.field(row,rule,'scope','Escopo','text',(['setup','teardown'].includes(this.phase)?[['global','Preparação global']]:[['journey','Jornada'],['session','Sessão do usuário']]));const l=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=!!rule.secret;check.onchange=()=>{this.checkpoint();rule.secret=check.checked;this.changed();};l.append(check,' Ocultar valor');row.append(l);}const remove=document.createElement('button');remove.type='button';remove.textContent='Remover regra';remove.onclick=()=>{this.checkpoint();node[key].splice(node[key].indexOf(rule),1);paint();this.changed();};row.append(remove);box.append(row);}};const add=document.createElement('button');add.type='button';add.textContent='Adicionar '+(key==='checks'?'validação':'extração');add.onclick=()=>{this.checkpoint();node[key].push(key==='checks'?{source:'json',path:'',operator:'exists'}:{source:'json',path:'',variable:'',scope:['setup','teardown'].includes(this.phase)?'global':'journey',secret:false});paint();this.changed();};box.append(add);parent.append(box);paint();}
-  draw(){if(this.canvas.hidden)return;this.canvas.replaceChildren();const tree=document.createElement('div');tree.className='flow-graph-tree';tree.style.setProperty('--flow-zoom',this.zoom);const paint=(nodes,parent)=>{for(const n of nodes){const button=document.createElement('button');button.type='button';button.className='flow-node';button.dataset.selected=String(n.id===this.selected);button.textContent=`${({request:'HTTP',condition:'SE',loop:'LOOP',pause:'PAUSA',group:'GRUPO'})[n.type]} · ${n.name || 'Passo'}`;button.onclick=()=>this.select(n.id);parent.append(button);if(n.type==='condition'){const branches=document.createElement('div');branches.className='flow-branches';for(const [key,label]of [['then','Verdadeiro'],['else','Falso']]){const branch=document.createElement('div');branch.className='flow-branch';const title=document.createElement('span');title.textContent=label;branch.append(title);paint(n[key],branch);branches.append(branch);}parent.append(branches);}else if(n.children){const nested=document.createElement('div');nested.className='flow-branch';paint(n.children,nested);parent.append(nested);}}};paint(this.flow[this.phase],tree);this.canvas.append(tree);}
-};
+  walk(nodes, fn) {
+    for (const n of nodes) {
+      fn(n)
+      for (const key of ['children', 'then', 'else'])
+        if (n[key]) this.walk(n[key], fn)
+    }
+  }
+  find(id) {
+    let found
+    for (const key of ['steps', 'setup', 'perUser', 'teardown'])
+      this.walk(this.flow[key], (n) => {
+        if (n.id === id) found = n
+      })
+    return found
+  }
+  locate(id, nodes = this.flow[this.phase]) {
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) return { nodes, index: i }
+      for (const key of ['children', 'then', 'else'])
+        if (nodes[i][key]) {
+          const found = this.locate(id, nodes[i][key])
+          if (found) return found
+        }
+    }
+  }
+  checkpoint() {
+    this.history.push(JSON.stringify(this.flow))
+    if (this.history.length > 60) this.history.shift()
+    this.future = []
+  }
+  changed() {
+    this.onChange()
+    this.buttons()
+    this.draw()
+  }
+  buttons() {
+    this.bar.querySelector('#flow-undo').disabled = !this.history.length
+    this.bar.querySelector('#flow-redo').disabled = !this.future.length
+  }
+  undo() {
+    if (!this.history.length) return
+    this.future.push(JSON.stringify(this.flow))
+    this.flow = JSON.parse(this.history.pop())
+    this.render()
+    this.changed()
+  }
+  redo() {
+    if (!this.future.length) return
+    this.history.push(JSON.stringify(this.flow))
+    this.flow = JSON.parse(this.future.pop())
+    this.render()
+    this.changed()
+  }
+  load(scenario = {}) {
+    this.flow = structuredClone({
+      ...scenario,
+      steps: scenario.steps || [],
+      setup: scenario.setup || [],
+      perUser: scenario.perUser || [],
+      teardown: scenario.teardown || [],
+    })
+    for (const key of ['steps', 'setup', 'perUser', 'teardown'])
+      this.walk(this.flow[key], (n) => {
+        n.id ||= this.id()
+        n.type ||= 'request'
+        n.checks ||= []
+        n.extracts ||= []
+      })
+    this.history = []
+    this.future = []
+    this.selected = this.flow.steps[0]?.id
+    this.phase = 'steps'
+    this.bar.querySelector('select').value = 'steps'
+    this.render()
+  }
+  value() {
+    return structuredClone(this.flow)
+  }
+  add(type = 'request', target) {
+    this.checkpoint()
+    const node = {
+      id: this.id(),
+      type,
+      name:
+        type === 'request'
+          ? 'Requisição'
+          : {
+              condition: 'Condição',
+              loop: 'Repetição',
+              pause: 'Pausa',
+              group: 'Transação',
+            }[type],
+      ...(type === 'request'
+        ? {
+            method: 'GET',
+            url: '',
+            headers: [],
+            bodyType: 'none',
+            body: '',
+            expectedStatus: 200,
+            checks: [],
+            extracts: [],
+          }
+        : type === 'pause'
+          ? { ms: 1000 }
+          : type === 'condition'
+            ? {
+                condition: { variable: '', operator: 'exists' },
+                then: [],
+                else: [],
+              }
+            : type === 'loop'
+              ? { mode: 'count', limit: 10, children: [] }
+              : { children: [] }),
+    }
+    ;(target || this.flow[this.phase]).push(node)
+    this.selected = node.id
+    this.render()
+    this.changed()
+    return node
+  }
+  select(id) {
+    this.selected = id
+    for (const phase of ['steps', 'setup', 'perUser', 'teardown']) {
+      let has = false
+      this.walk(this.flow[phase], (n) => {
+        if (n.id === id) has = true
+      })
+      if (has) this.phase = phase
+    }
+    this.bar.querySelector('select').value = this.phase
+    this.render()
+  }
+  setView(view) {
+    this.view = view
+    this.render()
+  }
+  render() {
+    this.root.replaceChildren()
+    const draw = (nodes, parent, depth = 0) => {
+      for (const node of nodes) {
+        const card = document.createElement('details')
+        card.className = 'request-card flow-card'
+        card.dataset.nodeId = node.id
+        card.dataset.depth = depth
+        card.open = node.id === this.selected
+        const summary = document.createElement('summary')
+        summary.className = 'request-head'
+        const title = document.createElement('span')
+        title.className = 'request-label'
+        title.textContent = `${node.type === 'request' ? node.method + ' ' : ''}${node.name || 'Passo'}`
+        summary.append(title)
+        const actions = document.createElement('span')
+        actions.className = 'request-controls'
+        for (const [label, action] of [
+          ['↑', 'up'],
+          ['↓', 'down'],
+          ['⧉', 'duplicate'],
+          ['×', 'remove'],
+        ]) {
+          const b = document.createElement('button')
+          b.type = 'button'
+          b.textContent = label
+          b.dataset.action = action
+          b.setAttribute(
+            'aria-label',
+            {
+              up: 'Mover requisição para cima',
+              down: 'Mover requisição para baixo',
+              duplicate: 'Duplicar requisição',
+              remove: 'Remover requisição',
+            }[action]
+          )
+          b.onclick = (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            this.checkpoint()
+            const loc = this.locate(node.id)
+            if (action === 'remove') {
+              loc.nodes.splice(loc.index, 1)
+              this.selected = null
+            }
+            if (action === 'up' && loc.index > 0)
+              [loc.nodes[loc.index - 1], loc.nodes[loc.index]] = [
+                loc.nodes[loc.index],
+                loc.nodes[loc.index - 1],
+              ]
+            if (action === 'down' && loc.index < loc.nodes.length - 1)
+              [loc.nodes[loc.index + 1], loc.nodes[loc.index]] = [
+                loc.nodes[loc.index],
+                loc.nodes[loc.index + 1],
+              ]
+            if (action === 'duplicate') {
+              const copy = structuredClone(node)
+              this.walk([copy], (n) => (n.id = this.id()))
+              loc.nodes.splice(loc.index + 1, 0, copy)
+              this.selected = copy.id
+            }
+            this.render()
+            this.changed()
+          }
+          actions.append(b)
+        }
+        summary.append(actions)
+        card.append(summary)
+        summary.onclick = (e) => {
+          if (e.target.closest('button')) return
+          e.preventDefault()
+          if (this.selected === node.id) {
+            card.open = !card.open
+            return
+          }
+          this.selected = node.id
+          this.render()
+        }
+        const body = document.createElement('div')
+        body.className = 'request-body'
+        if (node.id === this.selected) this.inspect(node, body)
+        card.append(body)
+        parent.append(card)
+        for (const key of ['children', 'then', 'else'])
+          if (node[key]) {
+            const nested = document.createElement('div')
+            nested.className = 'flow-nested'
+            const label = document.createElement('strong')
+            label.textContent =
+              key === 'then'
+                ? 'Se verdadeiro'
+                : key === 'else'
+                  ? 'Se falso'
+                  : 'Passos internos'
+            const button = document.createElement('button')
+            button.type = 'button'
+            button.textContent =
+              'Adicionar ao ' + label.textContent.toLowerCase()
+            button.onclick = () =>
+              this.add(this.controls.querySelector('select').value, node[key])
+            nested.append(label, button)
+            draw(node[key], nested, depth + 1)
+            parent.append(nested)
+          }
+      }
+    }
+    draw(this.flow[this.phase], this.root)
+    this.root.classList.toggle('graph-inspector', this.view === 'graph')
+    this.canvas.hidden = this.view !== 'graph'
+    this.layout.dataset.view = this.view
+    document.body.classList.toggle('editing-graph', this.view === 'graph')
+    this.bar
+      .querySelector('#flow-list')
+      .setAttribute('aria-pressed', String(this.view === 'list'))
+    this.bar
+      .querySelector('#flow-graph')
+      .setAttribute('aria-pressed', String(this.view === 'graph'))
+    this.buttons()
+    this.draw()
+  }
+  field(parent, node, key, label, type = 'text', choices) {
+    const l = document.createElement('label')
+    l.textContent = label
+    const el = document.createElement(
+      choices ? 'select' : type === 'textarea' ? 'textarea' : 'input'
+    )
+    el.dataset.field = key
+    if (choices)
+      for (const [value, text] of choices) {
+        const o = document.createElement('option')
+        o.value = value
+        o.textContent = text
+        el.append(o)
+      }
+    else if (type !== 'textarea') el.type = type
+    el.value = node[key] ?? ''
+    if (type === 'textarea') el.rows = 3
+    if (type === 'number') el.min = '0'
+    el.oninput = () => {
+      this.checkpoint()
+      node[key] =
+        type === 'number'
+          ? el.value === ''
+            ? undefined
+            : Number(el.value)
+          : el.value
+      this.changed()
+    }
+    l.append(el)
+    parent.append(l)
+    return el
+  }
+  inspect(n, parent) {
+    this.field(
+      parent,
+      n,
+      'name',
+      n.type === 'request' ? 'Nome da requisição' : 'Nome do bloco'
+    )
+    if (n.type === 'request') {
+      this.field(
+        parent,
+        n,
+        'method',
+        'Método',
+        'text',
+        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map(
+          (v) => [v, v]
+        )
+      )
+      this.field(parent, n, 'url', 'URL')
+      const header = {
+        headers: (n.headers || [])
+          .map((h) => `${h.key}: ${h.value}`)
+          .join('\n'),
+      }
+      const h = this.field(parent, header, 'headers', 'Headers', 'textarea')
+      h.oninput = () => {
+        this.checkpoint()
+        n.invalidHeaders = h.value
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .some((line) => line.indexOf(':') < 1)
+        n.headers = h.value
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((line) => {
+            const i = line.indexOf(':')
+            return {
+              key: line.slice(0, i).trim(),
+              value: line.slice(i + 1).trim(),
+            }
+          })
+        this.changed()
+      }
+      this.field(parent, n, 'bodyType', 'Tipo de corpo', 'text', [
+        ['none', 'Sem corpo'],
+        ['json', 'JSON'],
+        ['text', 'Texto'],
+        ['form', 'Formulário (a=b&c=d)'],
+      ])
+      this.field(parent, n, 'body', 'Corpo', 'textarea')
+      this.field(parent, n, 'expectedStatus', 'Status esperado', 'number')
+      this.field(parent, n, 'contains', 'Resposta contém')
+      const simple = {
+        jsonPath: n.jsonCheck?.path || '',
+        jsonValue: n.jsonCheck ? JSON.stringify(n.jsonCheck.value) : '',
+        extractPath: n.extract?.path || '',
+        extractVariable: n.extract?.variable || '',
+      }
+      for (const [key, label] of [
+        ['jsonPath', 'Campo JSON'],
+        ['jsonValue', 'Valor esperado (JSON)'],
+        ['extractPath', 'Extrair campo JSON'],
+        ['extractVariable', 'Salvar na variável'],
+      ]) {
+        const input = this.field(parent, simple, key, label)
+        input.oninput = () => {
+          this.checkpoint()
+          simple[key] = input.value
+          if (simple.jsonPath && simple.jsonValue) {
+            try {
+              n.jsonCheck = {
+                path: simple.jsonPath,
+                value: JSON.parse(simple.jsonValue),
+              }
+              delete n.invalidJsonCheck
+            } catch {
+              n.invalidJsonCheck = true
+            }
+          } else delete n.jsonCheck
+          if (simple.extractPath || simple.extractVariable)
+            n.extract = {
+              source: 'json',
+              path: simple.extractPath,
+              variable: simple.extractVariable,
+            }
+          else delete n.extract
+          this.changed()
+        }
+      }
+      this.ruleEditor(parent, n, 'checks', 'Validações adicionais')
+      this.ruleEditor(parent, n, 'extracts', 'Extrações adicionais')
+      this.field(
+        parent,
+        n,
+        'timeout',
+        'Timeout próprio (ms; vazio usa o teste)',
+        'number'
+      )
+      this.field(parent, n, 'retries', 'Novas tentativas (0–5)', 'number')
+      if (this.phase === 'steps') {
+        this.field(
+          parent,
+          n,
+          'p95Limit',
+          'p95 máximo deste endpoint (ms)',
+          'number'
+        )
+        this.field(
+          parent,
+          n,
+          'endpointSamples',
+          'Amostra mínima do endpoint',
+          'number'
+        )
+      }
+    } else if (n.type === 'pause') {
+      this.field(parent, n, 'ms', 'Pausa mínima (ms)', 'number')
+      this.field(parent, n, 'maxMs', 'Pausa máxima opcional (ms)', 'number')
+    } else if (n.type === 'loop') {
+      const mode = this.field(parent, n, 'mode', 'Repetir', 'text', [
+        ['count', 'Quantidade fixa'],
+        ['items', 'Itens de uma coleção'],
+        ['while', 'Enquanto condição verdadeira'],
+      ])
+      const updateMode = mode.oninput
+      mode.oninput = () => {
+        updateMode()
+        this.render()
+      }
+      this.field(parent, n, 'limit', 'Limite obrigatório (1–1000)', 'number')
+      if (n.mode === 'items')
+        this.field(parent, n, 'variable', 'Variável da coleção')
+      if (n.mode === 'while') this.condition(parent, n)
+    } else if (n.type === 'condition') this.condition(parent, n)
+    const help = document.createElement('small')
+    help.textContent =
+      'Variáveis: {{TOKEN}}, {{ITEM.id}}, {{INDEX}}. O loop e cada usuário possuem seu próprio contexto.'
+    parent.append(help)
+  }
+  condition(parent, n) {
+    n.condition ||= { variable: '', operator: 'exists' }
+    this.field(parent, n.condition, 'variable', 'Variável da condição')
+    this.field(
+      parent,
+      n.condition,
+      'operator',
+      'Comparação',
+      'text',
+      [
+        'exists',
+        'equals',
+        'notEquals',
+        'contains',
+        'gt',
+        'gte',
+        'lt',
+        'lte',
+      ].map((v) => [
+        v,
+        {
+          exists: 'Existe',
+          equals: 'Igual',
+          notEquals: 'Diferente',
+          contains: 'Contém',
+          gt: 'Maior',
+          gte: 'Maior ou igual',
+          lt: 'Menor',
+          lte: 'Menor ou igual',
+        }[v],
+      ])
+    )
+    const proxy = {
+      value:
+        n.condition.value === undefined
+          ? ''
+          : JSON.stringify(n.condition.value),
+    }
+    const input = this.field(
+      parent,
+      proxy,
+      'conditionValue',
+      'Valor da comparação (JSON)'
+    )
+    input.value = proxy.value
+    input.oninput = () => {
+      this.checkpoint()
+      try {
+        n.condition.value = input.value ? JSON.parse(input.value) : undefined
+        delete n.invalidCondition
+      } catch {
+        n.invalidCondition = true
+      }
+      this.changed()
+    }
+  }
+  ruleEditor(parent, node, key, label) {
+    const box = document.createElement('fieldset')
+    const legend = document.createElement('legend')
+    legend.textContent = label
+    box.dataset.field = key
+    box.tabIndex = -1
+    box.append(legend)
+    node[key] ||= []
+    const paint = () => {
+      box.querySelectorAll('.flow-rule').forEach((el) => el.remove())
+      for (const rule of node[key]) {
+        const row = document.createElement('div')
+        row.className = 'flow-rule'
+        this.field(
+          row,
+          rule,
+          'source',
+          'Origem',
+          'text',
+          (key === 'checks'
+            ? ['status', 'json', 'text', 'header', 'cookie']
+            : ['json', 'header', 'cookie']
+          ).map((v) => [v, v])
+        )
+        this.field(row, rule, 'path', 'Campo / header')
+        if (key === 'checks') {
+          this.field(
+            row,
+            rule,
+            'operator',
+            'Operador',
+            'text',
+            [
+              'equals',
+              'notEquals',
+              'contains',
+              'exists',
+              'gt',
+              'gte',
+              'lt',
+              'lte',
+            ].map((v) => [v, v])
+          )
+          const proxy = { value: JSON.stringify(rule.value) }
+          const input = this.field(row, proxy, 'value', 'Valor (JSON)')
+          input.oninput = () => {
+            this.checkpoint()
+            try {
+              rule.value = JSON.parse(input.value)
+              delete rule.invalid
+            } catch {
+              rule.invalid = true
+            }
+            this.changed()
+          }
+        } else {
+          this.field(row, rule, 'variable', 'Salvar na variável')
+          this.field(
+            row,
+            rule,
+            'scope',
+            'Escopo',
+            'text',
+            ['setup', 'teardown'].includes(this.phase)
+              ? [['global', 'Preparação global']]
+              : [
+                  ['journey', 'Jornada'],
+                  ['session', 'Sessão do usuário'],
+                ]
+          )
+          const l = document.createElement('label'),
+            check = document.createElement('input')
+          check.type = 'checkbox'
+          check.checked = !!rule.secret
+          check.onchange = () => {
+            this.checkpoint()
+            rule.secret = check.checked
+            this.changed()
+          }
+          l.append(check, ' Ocultar valor')
+          row.append(l)
+        }
+        const remove = document.createElement('button')
+        remove.type = 'button'
+        remove.textContent = 'Remover regra'
+        remove.onclick = () => {
+          this.checkpoint()
+          node[key].splice(node[key].indexOf(rule), 1)
+          paint()
+          this.changed()
+        }
+        row.append(remove)
+        box.append(row)
+      }
+    }
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.textContent =
+      'Adicionar ' + (key === 'checks' ? 'validação' : 'extração')
+    add.onclick = () => {
+      this.checkpoint()
+      node[key].push(
+        key === 'checks'
+          ? { source: 'json', path: '', operator: 'exists' }
+          : {
+              source: 'json',
+              path: '',
+              variable: '',
+              scope: ['setup', 'teardown'].includes(this.phase)
+                ? 'global'
+                : 'journey',
+              secret: false,
+            }
+      )
+      paint()
+      this.changed()
+    }
+    box.append(add)
+    parent.append(box)
+    paint()
+  }
+  draw() {
+    if (this.canvas.hidden) return
+    this.canvas.replaceChildren()
+    const tree = document.createElement('div')
+    tree.className = 'flow-graph-tree'
+    tree.style.setProperty('--flow-zoom', this.zoom)
+    const paint = (nodes, parent) => {
+      for (const n of nodes) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'flow-node'
+        button.dataset.selected = String(n.id === this.selected)
+        button.textContent = `${{ request: 'HTTP', condition: 'SE', loop: 'LOOP', pause: 'PAUSA', group: 'GRUPO' }[n.type]} · ${n.name || 'Passo'}`
+        button.onclick = () => this.select(n.id)
+        parent.append(button)
+        if (n.type === 'condition') {
+          const branches = document.createElement('div')
+          branches.className = 'flow-branches'
+          for (const [key, label] of [
+            ['then', 'Verdadeiro'],
+            ['else', 'Falso'],
+          ]) {
+            const branch = document.createElement('div')
+            branch.className = 'flow-branch'
+            const title = document.createElement('span')
+            title.textContent = label
+            branch.append(title)
+            paint(n[key], branch)
+            branches.append(branch)
+          }
+          parent.append(branches)
+        } else if (n.children) {
+          const nested = document.createElement('div')
+          nested.className = 'flow-branch'
+          paint(n.children, nested)
+          parent.append(nested)
+        }
+      }
+    }
+    paint(this.flow[this.phase], tree)
+    this.canvas.append(tree)
+  }
+}

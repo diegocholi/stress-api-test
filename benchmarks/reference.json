@@ -14,10 +14,7 @@
     "delayMs": 100,
     "seconds": 10,
     "repetitions": 5,
-    "steadyWindowSec": [
-      3,
-      9
-    ]
+    "steadyWindowSec": [3, 9]
   },
   "comparison": [
     {

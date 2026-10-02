@@ -1,4 +1,23 @@
 {
-  "info": {"name": "Exemplo local", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
-  "item": [{"name": "Health check", "request": {"method": "GET", "url": "{{BASE_URL}}/health"}, "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": ["pm.test('HTTP 200', function () { pm.response.to.have.status(200); });"]}}]}]
+  "info": {
+    "name": "Exemplo local",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health check",
+      "request": { "method": "GET", "url": "{{BASE_URL}}/health" },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    }
+  ]
 }

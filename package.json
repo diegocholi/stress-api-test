@@ -9,7 +9,9 @@
     "test": "node --test test/*.test.js",
     "demo:target": "node examples/target.js",
     "test:browser": "playwright test",
-    "benchmark": "node scripts/benchmark.js"
+    "benchmark": "node scripts/benchmark.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": [],
   "author": "",
@@ -20,6 +22,7 @@
     "yazl": "^3.3.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.63.0",
+    "prettier": "^3.9.9"
   }
 }

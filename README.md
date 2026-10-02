@@ -93,14 +93,25 @@ CLI aceita `--stages`, `--loadModel`, `--timeout`, `--minResponses`, `--minLoadP
 
 Rotas existentes de execução, biblioteca, agenda, comparação, séries, repetição e regeneração continuam disponíveis. Novas interfaces:
 
-| Rota | Resultado |
-|---|---|
-| `GET /api/engine` | Disponibilidade e versão do k6 |
-| `POST /api/migrate` | Diagnóstico e conversão conservadora |
-| `POST /api/validate` | Validação sem tráfego; erro com `nodeId`, `field` e índice quando aplicável |
-| `GET /api/runs/:id/events?page=1&pageSize=50&nodeId=id&type=request&stage=1` | Eventos paginados; limite 100 por página |
+| Rota                                                                         | Resultado                                                                   |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /api/engine`                                                            | Disponibilidade e versão do k6                                              |
+| `POST /api/migrate`                                                          | Diagnóstico e conversão conservadora                                        |
+| `POST /api/validate`                                                         | Validação sem tráfego; erro com `nodeId`, `field` e índice quando aplicável |
+| `GET /api/runs/:id/events?page=1&pageSize=50&nodeId=id&type=request&stage=1` | Eventos paginados; limite 100 por página                                    |
 
 Definições novas têm `schemaVersion: 4`, `engine: "k6"`, `scenario` com `setup`, `perUser`, `steps`, `teardown` e variáveis/dataset opcionais. Condições usam `condition: {variable, operator, value}` e `then`/`else`. Loops usam `mode`, `limit`, `variable` ou `condition`, e `children`. Posições visuais não fazem parte da definição executável.
+
+## Formatação do código
+
+```bash
+npm run format
+npm run format:check
+```
+
+`format` formata o código com Prettier e indentação de 2 espaços. `format:check` verifica a formatação sem alterar arquivos. Com pnpm, use `pnpm format` e `pnpm format:check`. Instale as dependências de desenvolvimento antes de executar os comandos.
+
+Dependências, arquivos de lock, dados locais, relatórios e artefatos gerados ficam fora da formatação.
 
 ## Verificação e calibração
 

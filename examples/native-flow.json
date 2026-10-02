@@ -4,10 +4,19 @@
   "mode": "builder",
   "name": "API local · jornada",
   "scenario": {
-    "variables": [{"key": "BASE_URL", "value": "http://127.0.0.1:4000"}],
-    "steps": [{"id": "health", "type": "request", "name": "Health", "method": "GET", "url": "{{BASE_URL}}/health", "checks": [{"source": "status", "operator": "equals", "value": 200}]}]
+    "variables": [{ "key": "BASE_URL", "value": "http://127.0.0.1:4000" }],
+    "steps": [
+      {
+        "id": "health",
+        "type": "request",
+        "name": "Health",
+        "method": "GET",
+        "url": "{{BASE_URL}}/health",
+        "checks": [{ "source": "status", "operator": "equals", "value": 200 }]
+      }
+    ]
   },
-  "stages": [{"durationSec": 30, "target": 5}],
-  "evidence": {"minResponses": 100, "minLoadPercent": 90},
-  "thresholds": {"p95": 1000, "errorRate": 1}
+  "stages": [{ "durationSec": 30, "target": 5 }],
+  "evidence": { "minResponses": 100, "minLoadPercent": 90 },
+  "thresholds": { "p95": 1000, "errorRate": 1 }
 }
