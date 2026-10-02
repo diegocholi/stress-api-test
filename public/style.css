@@ -3078,6 +3078,53 @@ body.mobile-layout .creation-steps {
   color: var(--text);
   font-size: 12px;
 }
+.flow-field-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.flow-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-family: Georgia, serif;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
+}
+.flow-info-icon:hover,
+.flow-info-icon:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.flow-help-tooltip {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input);
+  color: var(--text);
+  box-shadow: 0 6px 24px #0003;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .flow-inspector-empty,
 .flow-empty {
   color: var(--muted);

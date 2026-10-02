@@ -128,11 +128,56 @@ window.FlowEditor = class FlowEditor {
     return null
   }
   fieldHelp(parent, inputs, text) {
-    const help = document.createElement('p')
+    const help = document.createElement('div')
     help.id = `flow-help-${this.id()}`
-    help.className = 'flow-context-help'
+    help.className = 'flow-help-tooltip'
+    help.setAttribute('role', 'tooltip')
+    help.setAttribute('popover', 'manual')
     help.textContent = text
-    for (const input of inputs) input.setAttribute('aria-describedby', help.id)
+    for (const input of inputs) {
+      input.setAttribute('aria-describedby', help.id)
+      const label = input.closest('label')
+      const heading = document.createElement('span')
+      heading.className = 'flow-field-heading'
+      const title = label.firstChild
+      heading.append(title)
+      const icon = document.createElement('button')
+      icon.type = 'button'
+      icon.className = 'flow-info-icon'
+      icon.textContent = 'i'
+      icon.setAttribute('aria-label', `Ajuda: ${title.textContent}`)
+      icon.setAttribute('aria-describedby', help.id)
+      const show = () => {
+        help.showPopover()
+        const rect = icon.getBoundingClientRect()
+        const width = help.getBoundingClientRect().width
+        help.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`
+        const height = help.getBoundingClientRect().height
+        help.style.top = `${Math.max(12, rect.bottom + height + 20 > window.innerHeight ? rect.top - height - 8 : rect.bottom + 8)}px`
+      }
+      const hide = () => help.hidePopover()
+      icon.onmouseenter = show
+      icon.onmouseleave = (event) => {
+        if (event.relatedTarget !== help && document.activeElement !== icon)
+          hide()
+      }
+      help.onmouseleave = hide
+      icon.onfocus = show
+      icon.onblur = hide
+      icon.onclick = (event) => {
+        event.preventDefault()
+        show()
+      }
+      icon.onkeydown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          hide()
+        }
+      }
+      heading.append(icon)
+      label.prepend(heading)
+    }
     parent.append(help)
     return help
   }
@@ -522,6 +567,12 @@ window.FlowEditor = class FlowEditor {
           [url],
           `Esta requisição roda uma vez para cada item de ${loop.variable || 'sua coleção'}. O loop cria ITEM automaticamente com o item atual: use {{ITEM.id}} para seu ID ou {{ITEM}} se a lista contiver apenas valores. Exemplo: /api/itens/{{ITEM.id}}. {{INDEX}} é a posição do item, começando em 0. Essas variáveis ficam disponíveis nos passos dentro da repetição.`
         )
+      else
+        this.fieldHelp(
+          parent,
+          [url],
+          'Para usar uma variável salva por uma requisição anterior, escreva seu nome entre chaves duplas, como {{TOKEN}}. Cada usuário mantém seus próprios valores.'
+        )
       const header = {
         headers: (n.headers || [])
           .map((h) => `${h.key}: ${h.value}`)
@@ -643,7 +694,13 @@ window.FlowEditor = class FlowEditor {
         updateMode()
         this.render()
       }
-      this.field(parent, n, 'limit', 'Limite obrigatório (1–1000)', 'number')
+      const limit = this.field(
+        parent,
+        n,
+        'limit',
+        'Limite obrigatório (1–1000)',
+        'number'
+      )
       if (n.mode === 'items') {
         const collection = this.field(
           parent,
@@ -665,15 +722,11 @@ window.FlowEditor = class FlowEditor {
       }
       this.fieldHelp(
         parent,
-        [],
+        [limit],
         'O limite é o máximo de itens ou voltas a executar. Se a lista tiver mais itens que esse valor, apenas os primeiros serão percorridos.'
       )
       if (n.mode === 'while') this.condition(parent, n)
     } else if (n.type === 'condition') this.condition(parent, n)
-    const help = document.createElement('small')
-    help.textContent =
-      'Para usar uma variável salva por uma requisição anterior, escreva seu nome entre chaves duplas, como {{TOKEN}}. Cada usuário mantém seus próprios valores.'
-    parent.append(help)
   }
   condition(parent, n) {
     n.condition ||= { variable: '', operator: 'exists' }
@@ -1569,9 +1622,7 @@ window.FlowEditor = class FlowEditor {
           hint.className = 'flow-branch-hint'
           hint.textContent =
             node.type === 'loop'
-              ? node.mode === 'items'
-                ? `Um item de ${node.variable || 'sua coleção'} por volta. Nos passos abaixo, use {{ITEM.id}} para o ID do item atual. Use + ou arraste um bloco para dentro.`
-                : 'Estes passos executam a cada volta. Use + ou arraste um bloco para dentro.'
+              ? 'Estes passos executam a cada volta. Use + ou arraste um bloco para dentro.'
               : 'Estes passos executam em sequência. Use + ou arraste um bloco para dentro.'
           nested.append(title, hint)
           paint(node.children, nested)
