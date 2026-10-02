@@ -65,6 +65,79 @@ test('validation sends no traffic, reports inline errors and supports duplicate 
   )
   expect(errors).toEqual([])
 })
+test('simple rules survive repeated saves without creating additional rules', async ({
+  page,
+}) => {
+  const name = 'Regras sem duplicação'
+  page.on('dialog', (dialog) => dialog.accept())
+  await configure(page, name)
+  await page.locator('[data-field=contains]').fill('ok')
+  await page.locator('[data-field=jsonPath]').fill('ok')
+  await page.locator('[data-field=jsonValue]').fill('true')
+  await page.locator('[data-field=extractPath]').fill('ok')
+  await page.locator('[data-field=extractVariable]').fill('FLAG')
+  const checks = page.locator('fieldset[data-field=checks] .flow-rule')
+  const extracts = page.locator('fieldset[data-field=extracts] .flow-rule')
+  const reloadSaved = async () => {
+    await page.reload()
+    await page.getByRole('link', { name: /Testes salvos/ }).click()
+    await page
+      .getByRole('button', { name: `Carregar ${name}`, exact: true })
+      .click()
+    await expect(page.locator('#message')).toContainText('Teste carregado')
+  }
+  const save = async (checkCount) => {
+    const response = page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/templates') &&
+        res.request().method() === 'POST'
+    )
+    await page.locator('#save-test').click()
+    const saved = await response
+    expect(saved.ok()).toBe(true)
+    const templates = await (await page.request.get('/api/templates')).json()
+    const item = templates.find((t) => t.name === name)
+    const detail = await (
+      await page.request.get(`/api/templates/${item.id}`)
+    ).json()
+    expect(detail.definition.scenario.steps[0].checks).toHaveLength(checkCount)
+    expect(detail.definition.scenario.steps[0].extracts).toHaveLength(1)
+    return detail
+  }
+  for (let i = 0; i < 3; i++) {
+    const detail = await save(3)
+    if (i === 0) {
+      // Reproduce duplicates persisted by the previous editor.
+      const step = detail.definition.scenario.steps[0]
+      step.checks.push(...structuredClone(step.checks))
+      step.extracts.push(...structuredClone(step.extracts))
+      const updated = await page.request.post(`/api/templates/${detail.id}`, {
+        data: { ...detail.definition, revision: detail.revision },
+      })
+      expect(updated.ok()).toBe(true)
+    }
+    await reloadSaved()
+    await expect(checks).toHaveCount(0)
+    await expect(extracts).toHaveCount(0)
+    await expect(page.locator('[data-field=expectedStatus]')).toHaveValue('200')
+    await expect(page.locator('[data-field=contains]')).toHaveValue('ok')
+    await expect(page.locator('[data-field=jsonPath]')).toHaveValue('ok')
+    await expect(page.locator('[data-field=jsonValue]')).toHaveValue('true')
+    await expect(page.locator('[data-field=extractVariable]')).toHaveValue(
+      'FLAG'
+    )
+  }
+  await page
+    .getByRole('button', { name: 'Adicionar validação', exact: true })
+    .click()
+  await checks.locator('[data-field=path]').fill('ok')
+  await page.locator('[data-field=expectedStatus]').fill('201')
+  await save(4)
+  await reloadSaved()
+  await expect(checks).toHaveCount(1)
+  await expect(checks.locator('[data-field=operator]')).toHaveValue('exists')
+  await expect(page.locator('[data-field=expectedStatus]')).toHaveValue('201')
+})
 test('saved configuration executes, exports XLSX and restores historical charts after reload', async ({
   page,
 }) => {

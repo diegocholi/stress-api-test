@@ -123,6 +123,7 @@ window.FlowEditor = class FlowEditor {
         n.type ||= 'request'
         n.checks ||= []
         n.extracts ||= []
+        if (n.type === 'request') this.restoreSimpleRules(n)
       })
     this.history = []
     this.future = []
@@ -130,6 +131,48 @@ window.FlowEditor = class FlowEditor {
     this.phase = 'steps'
     this.bar.querySelector('select').value = 'steps'
     this.render()
+  }
+  restoreSimpleRules(node) {
+    // Saved flows use canonical rules; restore the inspector's simple fields.
+    const restore = (key, field, matches, value) => {
+      const rule = node[key].find(matches)
+      if (!rule) return
+      node[field] ??= value(rule)
+      const simple = value(rule)
+      if (JSON.stringify(node[field]) !== JSON.stringify(simple)) return
+      node[key] = node[key].filter(
+        (candidate) =>
+          !matches(candidate) ||
+          JSON.stringify(value(candidate)) !== JSON.stringify(simple)
+      )
+    }
+    restore(
+      'checks',
+      'expectedStatus',
+      (r) => r.source === 'status' && r.operator === 'equals',
+      (r) => r.value
+    )
+    restore(
+      'checks',
+      'contains',
+      (r) => r.source === 'text' && r.operator === 'contains',
+      (r) => r.value
+    )
+    restore(
+      'checks',
+      'jsonCheck',
+      (r) => r.source === 'json' && r.operator === 'equals',
+      (r) => ({ path: r.path, value: r.value })
+    )
+    restore(
+      'extracts',
+      'extract',
+      (r) =>
+        r.source === 'json' &&
+        (r.scope || 'journey') === 'journey' &&
+        !r.secret,
+      (r) => ({ source: 'json', path: r.path, variable: r.variable })
+    )
   }
   value() {
     return structuredClone(this.flow)

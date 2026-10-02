@@ -372,30 +372,7 @@ function readScenario() {
           { nodeId: n.id, field: 'jsonValue' }
         )
       if (n.type === 'request') {
-        n.checks = [
-          ...(n.checks || []),
-          ...(n.expectedStatus !== undefined && n.expectedStatus !== ''
-            ? [
-                {
-                  source: 'status',
-                  operator: 'equals',
-                  value: Number(n.expectedStatus),
-                },
-              ]
-            : []),
-          ...(n.contains
-            ? [{ source: 'text', operator: 'contains', value: n.contains }]
-            : []),
-          ...(n.jsonCheck
-            ? [{ source: 'json', operator: 'equals', ...n.jsonCheck }]
-            : []),
-        ]
-        n.extracts = [
-          ...(n.extracts || []),
-          ...(n.extract
-            ? [{ source: 'json', scope: 'journey', ...n.extract }]
-            : []),
-        ]
+        // The server normalizes simple fields into checks/extracts once.
         for (const field of [
           'timeout',
           'retries',
