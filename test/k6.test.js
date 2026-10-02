@@ -135,6 +135,89 @@ async function local(t, handler) {
   })
   return `http://127.0.0.1:${server.address().port}`
 }
+test('failed extractions explain the missing path and response shape without exposing values', async (t) => {
+  const bodies = {
+    nested: '{"data":{"items":[{"title":"PRIVATE-VALUE"}]}}',
+    array: '[{"id":8958}]',
+    null: '{"data":null}',
+    invalid: 'PRIVATE-NON-JSON',
+  }
+  const url = await local(t, (req, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.end(bodies[req.url.slice(1)])
+  })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stress-extraction-test-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const runner = new Runner(
+    {
+      schemaVersion: 4,
+      singleRun: true,
+      bail: false,
+      stages: '1:1',
+      scenario: {
+        steps: [
+          ...Object.keys(bodies).map((name) => ({
+            id: name,
+            name,
+            method: 'GET',
+            url: url + '/' + name,
+            extracts: [
+              {
+                source: 'json',
+                path: name === 'nested' ? 'data.items.0.id' : 'data',
+                variable: 'RESULT',
+              },
+            ],
+          })),
+          {
+            id: 'loop',
+            type: 'loop',
+            mode: 'items',
+            variable: 'RESULT',
+            limit: 1,
+            children: [
+              { id: 'detail', method: 'GET', url: url + '/{{ITEM.id}}' },
+            ],
+          },
+          { id: 'unavailable', method: 'GET', url: url + '/{{RESULT.id}}' },
+        ],
+      },
+    },
+    path.join(dir, 'diagnostics.xlsx')
+  )
+  const result = await runner.start()
+  assert.equal(result.requests, 4)
+  assert.equal(result.passed, false)
+  const archive = require('node:zlib')
+    .gunzipSync(fs.readFileSync(runner.eventsPath + '.gz'))
+    .toString()
+  const failures = Object.fromEntries(
+    archive
+      .trim()
+      .split('\n')
+      .map(JSON.parse)
+      .filter((e) => e.type === 'validation' && !e.passed)
+      .map((e) => [e.nodeId, e.message])
+  )
+  assert.match(failures.nested, /extrair RESULT .*data\.items\.0\.id.*HTTP 200/)
+  assert.match(
+    failures.nested,
+    /Campo "id" ausente em "data\.items\.0" .*campos disponíveis: title/
+  )
+  assert.match(
+    failures.array,
+    /Campo "data" ausente em "raiz" .*lista com 1 itens/
+  )
+  assert.match(failures.null, /Campo "data" contém null/)
+  assert.match(failures.invalid, /Resposta não contém JSON válido/)
+  assert.match(
+    failures.loop,
+    /Loop exige array na variável RESULT .*valor ausente/
+  )
+  assert.match(failures.unavailable, /Variável indisponível: RESULT.id/)
+  assert.equal(archive.includes('PRIVATE-VALUE'), false)
+  assert.equal(archive.includes('PRIVATE-NON-JSON'), false)
+})
 test('branches, typed templates, data rows, redirects and skipped paths have exact counts', async (t) => {
   const seen = []
   const url = await local(t, async (req, res) => {
