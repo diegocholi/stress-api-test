@@ -136,7 +136,7 @@ window.FlowEditor = class FlowEditor {
     help.textContent = text
     for (const input of inputs) {
       input.setAttribute('aria-describedby', help.id)
-      const label = input.closest('label')
+      const label = input.matches('legend') ? input : input.closest('label')
       const heading = document.createElement('span')
       heading.className = 'flow-field-heading'
       const title = label.firstChild
@@ -791,6 +791,12 @@ window.FlowEditor = class FlowEditor {
     box.dataset.field = key
     box.tabIndex = -1
     box.append(legend)
+    if (key === 'extracts')
+      this.fieldHelp(
+        box,
+        [legend],
+        'Cada extração salva um valor da resposta para usar nos próximos passos. Clique em Adicionar extração, escolha a Origem e informe o Campo / header e o nome em Salvar na variável, sem {{ }}. Exemplo: Origem json, Campo verticalList e variável PRODUTOS salvam a lista inteira. Depois, em Repetição → Itens de uma coleção, informe PRODUTOS. O loop cria ITEM automaticamente com cada elemento: use {{ITEM.id}} na requisição dentro dele. Para salvar só o primeiro ID, extraia verticalList.0.id na variável ID e use {{ID}} nos próximos passos.'
+      )
     node[key] ||= []
     const paint = () => {
       box.querySelectorAll('.flow-rule').forEach((el) => el.remove())

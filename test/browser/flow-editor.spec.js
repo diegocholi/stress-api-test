@@ -99,6 +99,16 @@ test('explains how an extracted collection becomes ITEM inside its loop', async 
   await expect(page.locator('.flow-config-dialog')).toBeVisible()
   // A request outside the loop should not claim that ITEM is available in its URL.
   await expect(await describedHelp('url')).not.toContainText('ITEM')
+  const additionalHelp = page
+    .locator('[data-field=extracts]')
+    .getByRole('tooltip')
+  await expect(additionalHelp).toBeHidden()
+  await page
+    .getByRole('button', { name: 'Ajuda: Extrações adicionais' })
+    .hover()
+  await expect(additionalHelp).toBeVisible()
+  await expect(additionalHelp).toContainText('Campo verticalList')
+  await expect(additionalHelp).toContainText('use {{ITEM.id}}')
   await configure('items')
   await page.locator('[data-field=variable]').fill('AGENDA')
   await expect(await describedHelp('variable')).toContainText(
