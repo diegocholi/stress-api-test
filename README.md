@@ -14,6 +14,8 @@ Abra http://127.0.0.1:3000. Dependências Node ausentes são instaladas pelo com
 
 ## Criar uma jornada
 
+Em **Testes salvos**, use **Exportar** no teste desejado para baixar sua configuração em JSON. **Importar teste** adiciona esse arquivo como um novo teste na biblioteca, mesmo se já houver outro com o mesmo nome. O arquivo preserva cenário, variáveis (incluindo credenciais), dataset, carga e critérios; histórico e agendamento ficam de fora. O limite de importação é 5 MB. A exportação usa a versão salva: salve alterações do editor antes de exportar.
+
 O editor possui lista acessível por teclado e fluxograma com organização automática, seleção, zoom, desfazer e refazer. A ordem da árvore define a execução; posições visuais não alteram o cenário. Configure **Cenário → Carga → Critérios → Revisão**.
 
 Blocos disponíveis:

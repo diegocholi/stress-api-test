@@ -652,6 +652,7 @@ fieldset {
   align-items: center;
   gap: 10px;
   margin-bottom: 15px;
+  margin-top: 15px;
 }
 .section-title > div {
   display: flex;
@@ -1789,6 +1790,9 @@ footer .status-dot {
 }
 .library-toolbar {
   padding: 16px 20px 0;
+}
+.library-toolbar #import-test {
+  margin-bottom: 12px;
 }
 .library-toolbar input {
   margin: 0;

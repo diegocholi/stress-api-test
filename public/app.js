@@ -795,6 +795,78 @@ function libraryMessage(message, error = false) {
   $('library-message').textContent = message
   $('library-message').classList.toggle('error', error)
 }
+async function exportTemplate(item, button) {
+  if (editorBusy || item.canRun === false) return
+  button.disabled = true
+  try {
+    const saved = await api(`/api/templates/${item.id}`)
+    if (saved.migration?.compatible === false)
+      throw new Error('Este teste precisa de adaptação antes de ser exportado.')
+    const { scheduledAt, ...definition } = saved.definition
+    const blob = new Blob([JSON.stringify(definition, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download =
+      (saved.definition.name
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+        .replace(/[. ]+$/g, '')
+        .slice(0, 100) || 'teste') + '.json'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    libraryMessage('Configuração salva exportada.')
+  } catch (error) {
+    libraryMessage(error.message, true)
+  } finally {
+    button.disabled = editorBusy || item.canRun === false
+  }
+}
+let importingTest = false
+$('import-test').onclick = () => $('import-test-file').click()
+$('import-test-file').onchange = async () => {
+  const input = $('import-test-file')
+  const file = input.files[0]
+  if (!file || importingTest) return
+  importingTest = true
+  $('import-test').disabled = true
+  try {
+    if (file.size > 5 * 1024 * 1024)
+      throw new Error('Limite de importação: 5 MB.')
+    let definition
+    try {
+      definition = JSON.parse((await file.text()).replace(/^\uFEFF/, ''))
+    } catch {
+      throw new Error('Arquivo JSON inválido.')
+    }
+    if (
+      !definition ||
+      typeof definition !== 'object' ||
+      Array.isArray(definition) ||
+      !definition.scenario ||
+      ![2, 3, 4].includes(definition.schemaVersion)
+    )
+      throw new Error(
+        'Selecione uma configuração de teste exportada pela aplicação.'
+      )
+    const { scheduledAt, ...configuration } = definition
+    // Account for JSON escaping and UTF-8 bytes in the actual upload limit.
+    if (new Blob([JSON.stringify(configuration)]).size > 5 * 1024 * 1024)
+      throw new Error('Limite de importação: 5 MB.')
+    const saved = await api('/api/templates', configuration)
+    await refreshLibrary()
+    libraryMessage(`Teste "${saved.name}" importado para a biblioteca.`)
+  } catch (error) {
+    libraryMessage(error.message, true)
+  } finally {
+    input.value = ''
+    importingTest = false
+    $('import-test').disabled = false
+  }
+}
 async function duplicateTemplate(id) {
   if (editorBusy) return
   try {
@@ -862,6 +934,11 @@ function renderLibrary() {
       actions.className = 'saved-actions'
       for (const [label, cls, action] of [
         ['Carregar', 'load-template', () => loadTemplate(item.id)],
+        [
+          'Exportar',
+          'export-template',
+          (event) => exportTemplate(item, event.currentTarget),
+        ],
         ['Duplicar', 'duplicate-template', () => duplicateTemplate(item.id)],
         ['Excluir', 'delete-template', () => deleteTemplate(item)],
       ]) {
@@ -869,7 +946,8 @@ function renderLibrary() {
         button.type = 'button'
         button.className = cls
         button.textContent = label
-        button.disabled = editorBusy
+        button.disabled =
+          editorBusy || (cls === 'export-template' && item.canRun === false)
         button.setAttribute('aria-label', `${label} ${item.name}`)
         button.onclick = action
         actions.append(button)
