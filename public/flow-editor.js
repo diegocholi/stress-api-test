@@ -30,7 +30,36 @@ window.FlowEditor = class FlowEditor {
     this.layout = document.createElement('div')
     this.layout.className = 'flow-layout'
     this.bar.after(this.layout)
-    this.layout.append(this.canvas, this.root)
+    this.graphPanel = document.createElement('section')
+    this.graphPanel.className = 'flow-graph-panel'
+    this.graphPanel.hidden = true
+    this.graphPanel.innerHTML =
+      '<div class="flow-canvas-tools"><strong>Construa sua jornada</strong><div><button type="button" data-graph-fit>Ajustar fluxograma</button><label>Zoom <input data-graph-zoom type="range" min="20" max="150" value="100"><output>100%</output></label></div></div><p class="flow-guide">Arraste pela alça para mover · Use + para adicionar · Clique no bloco para configurar</p>'
+    this.graphPanel.append(this.canvas)
+    this.layout.append(this.graphPanel, this.root)
+    this.graphPanel.querySelector('[data-graph-fit]').onclick = () => this.fit()
+    this.graphPanel.querySelector('[data-graph-zoom]').oninput = (event) => {
+      this.zoom = Number(event.target.value) / 100
+      this.draw()
+    }
+    this.status = document.createElement('p')
+    this.status.className = 'flow-feedback'
+    this.status.setAttribute('role', 'status')
+    this.status.setAttribute('aria-live', 'polite')
+    this.graphPanel.append(this.status)
+    document.addEventListener('pointerdown', (event) => {
+      if (
+        this.menu &&
+        !this.menu.contains(event.target) &&
+        !this.menuAnchor?.contains(event.target)
+      )
+        this.closeMenu(false)
+    })
+    window.addEventListener('resize', () => this.positionMenu())
+    window.addEventListener('scroll', () => this.positionMenu(), true)
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') this.closeMenu()
+    })
     this.layout.after(controls)
     bar.querySelector('#flow-phase').onchange = (e) => {
       this.phase = e.target.value
@@ -89,6 +118,16 @@ window.FlowEditor = class FlowEditor {
   changed() {
     this.onChange()
     this.buttons()
+    if (this.view === 'graph') {
+      const node = this.find(this.selected)
+      const heading = this.root.querySelector('.flow-inspector-card h3')
+      const path = this.root.querySelector('.flow-location')
+      if (node && heading) heading.textContent = node.name || 'Configurar bloco'
+      if (node && path)
+        path.textContent =
+          this.destinations().find((entry) => entry.nodes.includes(node))
+            ?.label || ''
+    }
     this.draw()
   }
   buttons() {
@@ -124,6 +163,11 @@ window.FlowEditor = class FlowEditor {
         n.checks ||= []
         n.extracts ||= []
         if (n.type === 'request') this.restoreSimpleRules(n)
+        if (n.type === 'condition') {
+          n.then ||= []
+          n.else ||= []
+        }
+        if (['loop', 'group'].includes(n.type)) n.children ||= []
       })
     this.history = []
     this.future = []
@@ -177,7 +221,23 @@ window.FlowEditor = class FlowEditor {
   value() {
     return structuredClone(this.flow)
   }
-  add(type = 'request', target) {
+  add(type = 'request', target, index = target?.length) {
+    if (this.view === 'graph') {
+      const destination = this.destinations().find(
+        (entry) => entry.nodes === (target || this.flow[this.phase])
+      )
+      if (
+        !destination ||
+        destination.depth +
+          (['loop', 'group', 'condition'].includes(type) ? 1 : 0) >
+          10
+      ) {
+        this.announce(
+          'Este ponto ultrapassa a profundidade máxima de 10 níveis.'
+        )
+        return
+      }
+    }
     this.checkpoint()
     const node = {
       id: this.id(),
@@ -214,10 +274,12 @@ window.FlowEditor = class FlowEditor {
               ? { mode: 'count', limit: 10, children: [] }
               : { children: [] }),
     }
-    ;(target || this.flow[this.phase]).push(node)
+    const nodes = target || this.flow[this.phase]
+    nodes.splice(index ?? nodes.length, 0, node)
     this.selected = node.id
     this.render()
     this.changed()
+    if (this.view === 'graph') this.focusNode(node.id)
     return node
   }
   select(id) {
@@ -235,8 +297,11 @@ window.FlowEditor = class FlowEditor {
   setView(view) {
     this.view = view
     this.render()
+    if (view === 'graph') this.fit()
   }
   render() {
+    this.dragCleanup?.()
+    this.closeMenu(false)
     this.root.replaceChildren()
     const draw = (nodes, parent, depth = 0) => {
       for (const node of nodes) {
@@ -342,7 +407,10 @@ window.FlowEditor = class FlowEditor {
           }
       }
     }
-    draw(this.flow[this.phase], this.root)
+    if (this.view === 'graph') this.renderInspector()
+    else draw(this.flow[this.phase], this.root)
+    this.controls.hidden = this.view === 'graph'
+    this.graphPanel.hidden = this.view !== 'graph'
     this.root.classList.toggle('graph-inspector', this.view === 'graph')
     this.canvas.hidden = this.view !== 'graph'
     this.layout.dataset.view = this.view
@@ -704,46 +772,670 @@ window.FlowEditor = class FlowEditor {
     parent.append(box)
     paint()
   }
-  draw() {
-    if (this.canvas.hidden) return
-    this.canvas.replaceChildren()
-    const tree = document.createElement('div')
-    tree.className = 'flow-graph-tree'
-    tree.style.setProperty('--flow-zoom', this.zoom)
-    const paint = (nodes, parent) => {
-      for (const n of nodes) {
-        const button = document.createElement('button')
-        button.type = 'button'
-        button.className = 'flow-node'
-        button.dataset.selected = String(n.id === this.selected)
-        button.textContent = `${{ request: 'HTTP', condition: 'SE', loop: 'LOOP', pause: 'PAUSA', group: 'GRUPO' }[n.type]} · ${n.name || 'Passo'}`
-        button.onclick = () => this.select(n.id)
-        parent.append(button)
-        if (n.type === 'condition') {
-          const branches = document.createElement('div')
-          branches.className = 'flow-branches'
-          for (const [key, label] of [
-            ['then', 'Verdadeiro'],
-            ['else', 'Falso'],
-          ]) {
-            const branch = document.createElement('div')
-            branch.className = 'flow-branch'
-            const title = document.createElement('span')
-            title.textContent = label
-            branch.append(title)
-            paint(n[key], branch)
-            branches.append(branch)
-          }
-          parent.append(branches)
-        } else if (n.children) {
-          const nested = document.createElement('div')
-          nested.className = 'flow-branch'
-          paint(n.children, nested)
-          parent.append(nested)
+  kinds() {
+    return [
+      ['request', 'Requisição HTTP', 'Chame um endpoint e valide a resposta.'],
+      ['condition', 'Condição', 'Escolha um caminho conforme uma variável.'],
+      ['loop', 'Repetição', 'Execute os passos internos várias vezes.'],
+      ['pause', 'Pausa', 'Aguarde antes de continuar.'],
+      ['group', 'Grupo / transação', 'Organize passos em uma mesma operação.'],
+    ]
+  }
+  announce(message) {
+    if (this.status.textContent !== message) this.status.textContent = message
+  }
+  destinations() {
+    const entries = []
+    const visit = (nodes, label, depth, ancestors = []) => {
+      entries.push({ nodes, label, depth, ancestors })
+      for (const node of nodes) {
+        for (const key of ['children', 'then', 'else']) {
+          if (!node[key]) continue
+          const branch = {
+            children: 'Passos internos',
+            then: 'Se verdadeiro',
+            else: 'Se falso',
+          }[key]
+          visit(
+            node[key],
+            `${label} › ${node.name || 'Passo'} › ${branch}`,
+            depth + 1,
+            [...ancestors, node.id]
+          )
         }
       }
     }
+    visit(
+      this.flow[this.phase],
+      this.bar.querySelector('#flow-phase').selectedOptions[0].textContent,
+      0
+    )
+    return entries
+  }
+  canMove(id, destination, index) {
+    const source = this.locate(id)
+    if (
+      !source ||
+      !destination ||
+      index < 0 ||
+      index > destination.nodes.length ||
+      destination.ancestors.includes(id)
+    )
+      return false
+    const height = (node) =>
+      Math.max(
+        0,
+        ...['children', 'then', 'else']
+          .filter((key) => node[key])
+          .map((key) => 1 + Math.max(0, ...node[key].map(height)))
+      )
+    if (destination.depth + height(source.nodes[source.index]) > 10)
+      return false
+    return (
+      source.nodes !== destination.nodes ||
+      (index !== source.index && index !== source.index + 1)
+    )
+  }
+  move(id, destination, index) {
+    // Re-resolve destinations so a stale pointer cannot edit an old tree after undo.
+    const current = this.destinations().find(
+      (entry) => entry.nodes === destination?.nodes
+    )
+    if (!this.canMove(id, current, index)) return false
+    const source = this.locate(id)
+    this.checkpoint()
+    const [node] = source.nodes.splice(source.index, 1)
+    if (source.nodes === current.nodes && source.index < index) index--
+    current.nodes.splice(index, 0, node)
+    this.selected = id
+    this.render()
+    this.changed()
+    this.focusNode(id)
+    this.announce(
+      `${node.name || 'Bloco'} movido para ${current.label}, posição ${index + 1}.`
+    )
+    return true
+  }
+  focusNode(id) {
+    const button = [...this.canvas.querySelectorAll('.flow-node')].find(
+      (element) => element.dataset.nodeId === id
+    )
+    button?.focus({ preventScroll: true })
+    button?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }
+  describe(node) {
+    if (node.type === 'request')
+      return `${node.method || 'GET'} · ${node.url || 'Configure o endpoint'}`
+    if (node.type === 'pause')
+      return `Aguardar ${node.ms ?? 1000} ms${node.maxMs ? ` a ${node.maxMs} ms` : ''}`
+    if (node.type === 'condition') {
+      const rule = node.condition
+      if (!rule?.variable) return 'Configure a variável e a comparação'
+      const operator =
+        {
+          exists: 'existe',
+          equals: 'é igual a',
+          notEquals: 'é diferente de',
+          contains: 'contém',
+          gt: 'é maior que',
+          gte: 'é maior ou igual a',
+          lt: 'é menor que',
+          lte: 'é menor ou igual a',
+        }[rule.operator] || rule.operator
+      return `${rule.variable} ${operator}${rule.operator === 'exists' ? '' : ` ${rule.value === undefined ? '…' : JSON.stringify(rule.value)}`}`
+    }
+    if (node.type === 'loop')
+      return node.mode === 'items'
+        ? `Para cada item de ${node.variable || 'uma coleção'} · limite ${node.limit}`
+        : node.mode === 'while'
+          ? `Enquanto a condição for verdadeira · limite ${node.limit}`
+          : `Repetir ${node.limit ?? 10} vezes`
+    return `${node.children?.length || 0} passos agrupados`
+  }
+  renderInspector() {
+    const node = this.find(this.selected)
+    if (!node || !this.locate(node.id)) {
+      const empty = document.createElement('div')
+      empty.className = 'flow-inspector-empty'
+      empty.innerHTML =
+        '<strong>Configure um bloco</strong><p>Selecione um bloco no fluxograma para editar seus detalhes. Para começar, use o + no ponto em que deseja inserir um passo.</p>'
+      this.root.append(empty)
+      return
+    }
+    const location = this.destinations().find((entry) =>
+      entry.nodes.includes(node)
+    )
+    const card = document.createElement('section')
+    card.className = 'flow-card flow-inspector-card'
+    card.dataset.nodeId = node.id
+    card.setAttribute('open', '')
+    const heading = document.createElement('h3')
+    heading.textContent = node.name || 'Configurar bloco'
+    const path = document.createElement('p')
+    path.className = 'flow-location'
+    path.textContent = location.label
+    const actions = document.createElement('div')
+    actions.className = 'flow-inspector-actions'
+    for (const [label, action] of [
+      ['Mover para…', 'move'],
+      ['Duplicar', 'duplicate'],
+      ['Remover', 'remove'],
+    ]) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = label
+      button.onclick = () => {
+        if (action === 'move') return this.moveDialog(node, button)
+        this.checkpoint()
+        const loc = this.locate(node.id)
+        if (action === 'remove') {
+          loc.nodes.splice(loc.index, 1)
+          this.selected =
+            loc.nodes[Math.min(loc.index, loc.nodes.length - 1)]?.id || null
+        } else {
+          const copy = structuredClone(node)
+          this.walk([copy], (child) => (child.id = this.id()))
+          loc.nodes.splice(loc.index + 1, 0, copy)
+          this.selected = copy.id
+        }
+        this.render()
+        this.changed()
+        if (this.selected) this.focusNode(this.selected)
+        else
+          this.canvas
+            .querySelector('.flow-insert button')
+            ?.focus({ preventScroll: true })
+        this.announce(
+          action === 'remove'
+            ? 'Bloco removido. Você pode desfazer esta ação.'
+            : 'Bloco e seus passos duplicados.'
+        )
+      }
+      actions.append(button)
+    }
+    card.append(heading, path, actions)
+    if (['loop', 'condition', 'group'].includes(node.type)) {
+      const help = document.createElement('p')
+      help.className = 'flow-context-help'
+      help.textContent =
+        node.type === 'loop'
+          ? 'Todos os passos dentro desta repetição são executados a cada volta. Use + ou arraste um bloco para dentro. Ao sair do loop, a jornada continua no próximo bloco.'
+          : node.type === 'condition'
+            ? 'A variável é comparada com a regra abaixo. Apenas o ramo correspondente ao resultado é executado; depois, a jornada continua.'
+            : 'Os passos deste grupo são executados em sequência. Arraste o grupo pela alça para mover todos os seus passos juntos.'
+      card.append(help)
+    }
+    const body = document.createElement('div')
+    body.className = 'request-body'
+    this.inspect(node, body)
+    card.append(body)
+    this.root.append(card)
+  }
+  closeMenu(restoreFocus = true) {
+    if (!this.menu) return
+    this.menu.remove()
+    this.menu = null
+    this.menuAnchor?.setAttribute('aria-expanded', 'false')
+    if (restoreFocus && this.menuAnchor?.isConnected)
+      this.menuAnchor.focus({ preventScroll: true })
+    this.menuAnchor = null
+  }
+  positionMenu() {
+    if (!this.menu || !this.menuAnchor?.isConnected) return
+    const rect = this.menuAnchor.getBoundingClientRect()
+    const canvasRect = this.canvas.getBoundingClientRect()
+    if (
+      rect.bottom < Math.max(0, canvasRect.top) ||
+      rect.top > Math.min(window.innerHeight, canvasRect.bottom) ||
+      rect.right < canvasRect.left ||
+      rect.left > canvasRect.right
+    ) {
+      this.closeMenu()
+      return
+    }
+    const width = this.menu.offsetWidth
+    const height = this.menu.offsetHeight
+    this.menu.style.left = `${Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8))}px`
+    this.menu.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - height - 8))}px`
+  }
+  creationMenu(anchor, destination, index) {
+    if (this.menuAnchor === anchor) return this.closeMenu()
+    this.closeMenu(false)
+    const menu = document.createElement('div')
+    menu.className = 'flow-create-menu'
+    menu.setAttribute('role', 'dialog')
+    menu.setAttribute('aria-label', 'Adicionar bloco neste ponto')
+    const title = document.createElement('strong')
+    title.textContent = 'Adicionar neste ponto'
+    const context = document.createElement('small')
+    context.textContent = destination.label
+    menu.append(title, context)
+    for (const [kind, name, description] of this.kinds()) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.createKind = kind
+      button.disabled =
+        destination.depth +
+          (['loop', 'group', 'condition'].includes(kind) ? 1 : 0) >
+        10
+      const label = document.createElement('strong')
+      label.textContent = name
+      const hint = document.createElement('small')
+      hint.textContent = button.disabled
+        ? 'Limite de profundidade atingido'
+        : description
+      button.append(label, hint)
+      button.onclick = () => {
+        this.closeMenu(false)
+        const node = this.add(kind, destination.nodes, index)
+        if (node)
+          this.announce(
+            `${name} adicionado em ${destination.label}. Selecione os campos ao lado para configurar.`
+          )
+      }
+      menu.append(button)
+    }
+    menu.addEventListener('keydown', (event) => {
+      const buttons = [...menu.querySelectorAll('button:not(:disabled)')]
+      const at = buttons.indexOf(document.activeElement)
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Tab'].includes(event.key)) {
+        event.preventDefault()
+        const next =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? buttons.length - 1
+              : (at +
+                  (event.key === 'ArrowUp' ||
+                  (event.key === 'Tab' && event.shiftKey)
+                    ? -1
+                    : 1) +
+                  buttons.length) %
+                buttons.length
+        buttons[next]?.focus()
+      }
+    })
+    document.body.append(menu)
+    this.menu = menu
+    this.menuAnchor = anchor
+    anchor.setAttribute('aria-expanded', 'true')
+    this.positionMenu()
+    menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
+  }
+  moveDialog(node, anchor) {
+    const dialog = document.createElement('dialog')
+    dialog.className = 'flow-move-dialog'
+    const heading = document.createElement('h3')
+    heading.id = 'flow-move-title'
+    heading.textContent = `Mover ${node.name || 'bloco'}`
+    dialog.setAttribute('aria-labelledby', heading.id)
+    const label = document.createElement('label')
+    label.textContent = 'Destino e posição'
+    const select = document.createElement('select')
+    const choices = []
+    for (const destination of this.destinations()) {
+      for (let index = 0; index <= destination.nodes.length; index++) {
+        if (!this.canMove(node.id, destination, index)) continue
+        const option = document.createElement('option')
+        option.value = choices.length
+        option.textContent = `${destination.label} · ${index < destination.nodes.length ? `antes de ${destination.nodes[index].name || 'Passo'}` : 'no final'}`
+        choices.push({ destination, index })
+        select.append(option)
+      }
+    }
+    label.append(select)
+    const hint = document.createElement('p')
+    hint.textContent = choices.length
+      ? 'O bloco será movido com todos os seus passos internos.'
+      : 'Não há outro destino disponível. Adicione um bloco ou contêiner primeiro.'
+    const cancel = document.createElement('button')
+    cancel.type = 'button'
+    cancel.textContent = 'Cancelar'
+    cancel.onclick = () => dialog.close()
+    const confirm = document.createElement('button')
+    confirm.type = 'button'
+    confirm.textContent = 'Mover bloco'
+    confirm.disabled = !choices.length
+    select.disabled = !choices.length
+    let moved = false
+    confirm.onclick = () => {
+      const choice = choices[Number(select.value)]
+      dialog.close()
+      moved = this.move(node.id, choice.destination, choice.index)
+    }
+    dialog.append(heading, label, hint, cancel, confirm)
+    dialog.addEventListener('close', () => {
+      dialog.remove()
+      if (!moved && anchor.isConnected) anchor.focus({ preventScroll: true })
+    })
+    document.body.append(dialog)
+    dialog.showModal()
+  }
+  fit() {
+    const tree = this.canvas.querySelector('.flow-graph-tree')
+    if (!tree) return
+    const rect = tree.getBoundingClientRect()
+    this.zoom = Math.max(
+      0.2,
+      Math.min(
+        1.5,
+        (this.canvas.clientWidth - 40) / (rect.width / this.zoom),
+        (this.canvas.clientHeight - 40) / (rect.height / this.zoom)
+      )
+    )
+    this.zoom = Math.floor(this.zoom * 100) / 100
+    this.draw()
+  }
+  startDrag(event, node, handle) {
+    if (event.button !== 0 || this.dragCleanup) return
+    delete handle.dataset.suppressClick
+    const start = { x: event.clientX, y: event.clientY }
+    let point = start,
+      dragging = false,
+      target = null,
+      frame,
+      ghost
+    const controller = new AbortController()
+    const options = { signal: controller.signal }
+    handle.setPointerCapture(event.pointerId)
+    const clearTarget = () => {
+      target?.element.removeAttribute('data-drop-active')
+      target = null
+    }
+    const update = () => {
+      if (!dragging) return
+      ghost.style.left = `${point.x + 16}px`
+      ghost.style.top = `${point.y + 16}px`
+      clearTarget()
+      const elements = document.elementsFromPoint(point.x, point.y)
+      const insertion = elements
+        .map((element) => element.closest('.flow-insert'))
+        .find(Boolean)
+      const container = elements
+        .map((element) => element.closest('[data-flow-container]'))
+        .find(Boolean)
+      const element = insertion || container
+      const slot = element?._flowSlot
+      if (slot && this.canMove(node.id, slot.destination, slot.index)) {
+        target = { element, ...slot }
+        element.dataset.dropActive = 'true'
+        this.announce(
+          `Solte para mover para ${slot.destination.label}, posição ${slot.index + 1}.`
+        )
+      } else
+        this.announce(
+          slot
+            ? 'Este destino não altera a posição ou não permite este movimento.'
+            : 'Arraste até um + ou para dentro de um contêiner. Escape cancela.'
+        )
+    }
+    const tick = () => {
+      if (dragging) {
+        const rect = this.canvas.getBoundingClientRect()
+        if (
+          point.x >= rect.left &&
+          point.x <= rect.right &&
+          point.y >= rect.top &&
+          point.y <= rect.bottom
+        ) {
+          const dy =
+            point.y < rect.top + 48 ? -10 : point.y > rect.bottom - 48 ? 10 : 0
+          const dx =
+            point.x < rect.left + 48 ? -10 : point.x > rect.right - 48 ? 10 : 0
+          if (dx || dy) {
+            this.canvas.scrollBy(dx, dy)
+            update()
+          }
+        }
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    const cleanup = () => {
+      controller.abort()
+      cancelAnimationFrame(frame)
+      clearTarget()
+      ghost?.remove()
+      this.canvas.classList.remove('flow-dragging')
+      this.canvas
+        .querySelector('[data-drag-source]')
+        ?.removeAttribute('data-drag-source')
+      if (handle.hasPointerCapture(event.pointerId))
+        handle.releasePointerCapture(event.pointerId)
+      this.dragCleanup = null
+    }
+    this.dragCleanup = cleanup
+    window.addEventListener(
+      'pointermove',
+      (moveEvent) => {
+        if (moveEvent.pointerId !== event.pointerId) return
+        point = { x: moveEvent.clientX, y: moveEvent.clientY }
+        if (!dragging && Math.hypot(point.x - start.x, point.y - start.y) < 6)
+          return
+        moveEvent.preventDefault()
+        if (!dragging) {
+          dragging = true
+          handle.dataset.suppressClick = 'true'
+          this.closeMenu(false)
+          this.canvas.classList.add('flow-dragging')
+          handle.closest('.flow-block').dataset.dragSource = 'true'
+          ghost = document.createElement('div')
+          ghost.className = 'flow-drag-ghost'
+          ghost.textContent = node.name || 'Bloco'
+          document.body.append(ghost)
+          tick()
+        }
+        update()
+      },
+      { ...options, passive: false }
+    )
+    window.addEventListener(
+      'pointerup',
+      (upEvent) => {
+        if (upEvent.pointerId !== event.pointerId) return
+        const destination = target
+        cleanup()
+        if (dragging && destination)
+          this.move(node.id, destination.destination, destination.index)
+        else if (dragging)
+          this.announce('Movimento cancelado. O bloco continua no mesmo lugar.')
+      },
+      options
+    )
+    const cancel = () => {
+      cleanup()
+      this.announce('Movimento cancelado. O bloco continua no mesmo lugar.')
+    }
+    window.addEventListener('pointercancel', cancel, options)
+    window.addEventListener('blur', cancel, options)
+    window.addEventListener(
+      'keydown',
+      (keyEvent) => {
+        if (keyEvent.key === 'Escape') {
+          keyEvent.preventDefault()
+          cancel()
+        }
+      },
+      options
+    )
+  }
+  draw() {
+    if (this.canvas.hidden) return
+    const scroll = { left: this.canvas.scrollLeft, top: this.canvas.scrollTop }
+    const focusKey = this.canvas.contains(document.activeElement)
+      ? document.activeElement.dataset.focusKey
+      : null
+    this.closeMenu(false)
+    this.canvas.replaceChildren()
+    const slider = this.graphPanel.querySelector('[data-graph-zoom]')
+    slider.value = Math.round(this.zoom * 100)
+    this.graphPanel.querySelector('output').textContent =
+      `${Math.round(this.zoom * 100)}%`
+    const tree = document.createElement('div')
+    tree.className = 'flow-graph-tree'
+    tree.style.setProperty('--flow-zoom', this.zoom)
+    const destinations = this.destinations()
+    const paint = (nodes, parent) => {
+      const destination = destinations.find((entry) => entry.nodes === nodes)
+      const insert = (index) => {
+        const slot = document.createElement('div')
+        slot.className = 'flow-insert'
+        slot._flowSlot = { destination, index }
+        slot.dataset.position = index
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.textContent = '+'
+        button.dataset.focusKey = `insert:${this.phase}:${destination.ancestors.join('/')}:${index}`
+        button.setAttribute(
+          'aria-label',
+          `Adicionar bloco em ${destination.label}, posição ${index + 1}`
+        )
+        button.setAttribute('aria-haspopup', 'dialog')
+        button.setAttribute('aria-expanded', 'false')
+        button.onclick = () => this.creationMenu(button, destination, index)
+        const hint = document.createElement('span')
+        hint.textContent = 'Inserir aqui'
+        slot.append(button, hint)
+        parent.append(slot)
+      }
+      insert(0)
+      for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index]
+        const block = document.createElement('article')
+        block.className = 'flow-block'
+        block.dataset.kind = node.type
+        block.dataset.selected = String(node.id === this.selected)
+        block.dataset.nodeId = node.id
+        const header = document.createElement('div')
+        header.className = 'flow-block-head'
+        const handle = document.createElement('button')
+        handle.type = 'button'
+        handle.className = 'flow-drag-handle'
+        handle.textContent = '⠿'
+        handle.setAttribute('aria-label', `Arrastar ${node.name || 'bloco'}`)
+        handle.title = 'Arraste para mover; clique para escolher um destino'
+        handle.dataset.focusKey = `handle:${node.id}`
+        handle.onpointerdown = (event) => this.startDrag(event, node, handle)
+        handle.onclick = (event) => {
+          if (event.detail !== 0 && handle.dataset.suppressClick) {
+            delete handle.dataset.suppressClick
+            return
+          }
+          delete handle.dataset.suppressClick
+          this.moveDialog(node, handle)
+        }
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'flow-node'
+        button.dataset.nodeId = node.id
+        button.dataset.selected = String(node.id === this.selected)
+        button.dataset.focusKey = `node:${node.id}`
+        button.setAttribute('aria-pressed', String(node.id === this.selected))
+        const badge = document.createElement('span')
+        badge.className = 'flow-node-type'
+        badge.textContent = {
+          request: 'HTTP',
+          condition: 'CONDIÇÃO',
+          loop: 'REPETIÇÃO',
+          pause: 'PAUSA',
+          group: 'GRUPO',
+        }[node.type]
+        const name = document.createElement('strong')
+        name.textContent = node.name || 'Passo'
+        const summary = document.createElement('small')
+        summary.textContent = this.describe(node)
+        button.append(badge, name, summary)
+        button.onclick = () => {
+          this.select(node.id)
+          this.focusNode(node.id)
+        }
+        header.append(handle, button)
+        block.append(header)
+        if (node.type === 'condition') {
+          const branches = document.createElement('div')
+          branches.className = 'flow-branches'
+          for (const [key, label] of [
+            ['then', 'Se verdadeiro'],
+            ['else', 'Se falso'],
+          ]) {
+            const branch = document.createElement('section')
+            branch.className = 'flow-branch'
+            branch.dataset.flowContainer = key
+            const childDestination = destinations.find(
+              (entry) => entry.nodes === node[key]
+            )
+            branch._flowSlot = {
+              destination: childDestination,
+              index: node[key].length,
+            }
+            const title = document.createElement('strong')
+            title.textContent = label
+            const hint = document.createElement('p')
+            hint.className = 'flow-branch-hint'
+            hint.textContent = node[key].length
+              ? 'Executar quando a condição for ' +
+                (key === 'then' ? 'verdadeira.' : 'falsa.')
+              : 'Use + ou arraste um bloco aqui. Este caminho só executa quando a condição for ' +
+                (key === 'then' ? 'verdadeira.' : 'falsa.')
+            branch.append(title, hint)
+            paint(node[key], branch)
+            branches.append(branch)
+          }
+          const merge = document.createElement('p')
+          merge.className = 'flow-return'
+          merge.textContent = '↓ Os caminhos voltam à sequência'
+          block.append(branches, merge)
+        } else if (node.children) {
+          const nested = document.createElement('section')
+          nested.className = 'flow-branch'
+          nested.dataset.flowContainer = 'children'
+          const childDestination = destinations.find(
+            (entry) => entry.nodes === node.children
+          )
+          const slot = {
+            destination: childDestination,
+            index: node.children.length,
+          }
+          nested._flowSlot = slot
+          header.dataset.flowContainer = 'children'
+          header._flowSlot = slot
+          const title = document.createElement('strong')
+          title.textContent =
+            node.type === 'loop' ? 'Dentro da repetição' : 'Dentro do grupo'
+          const hint = document.createElement('p')
+          hint.className = 'flow-branch-hint'
+          hint.textContent =
+            node.type === 'loop'
+              ? 'Estes passos executam a cada volta. Use + ou arraste um bloco para dentro.'
+              : 'Estes passos executam em sequência. Use + ou arraste um bloco para dentro.'
+          nested.append(title, hint)
+          paint(node.children, nested)
+          block.append(nested)
+          const exit = document.createElement('p')
+          exit.className = 'flow-return'
+          exit.textContent =
+            node.type === 'loop'
+              ? '↓ Ao terminar as repetições, continuar'
+              : '↓ Ao terminar o grupo, continuar'
+          block.append(exit)
+        }
+        parent.append(block)
+        insert(index + 1)
+      }
+    }
+    if (!this.flow[this.phase].length) {
+      const empty = document.createElement('p')
+      empty.className = 'flow-empty'
+      empty.textContent =
+        'Comece pelo + abaixo. Adicione uma requisição ou um bloco para organizar sua jornada.'
+      tree.append(empty)
+    }
     paint(this.flow[this.phase], tree)
     this.canvas.append(tree)
+    this.canvas.scrollLeft = scroll.left
+    this.canvas.scrollTop = scroll.top
+    if (focusKey)
+      [...this.canvas.querySelectorAll('[data-focus-key]')]
+        .find((element) => element.dataset.focusKey === focusKey)
+        ?.focus({ preventScroll: true })
   }
 }

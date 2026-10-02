@@ -524,3 +524,72 @@ test('mobile menu supports keyboard dismissal, selection and all destinations wi
   await expect(page.locator('.sidebar')).toBeVisible()
   await expect(toggle).toBeHidden()
 })
+
+test('dragged loop saves, reloads and executes the moved request twice', async ({
+  page,
+}) => {
+  page.on('dialog', (dialog) => dialog.accept())
+  const name = `Fluxograma com arraste ${test.info().repeatEachIndex}`
+  await configure(page, name)
+  const original = await page.evaluate(() => flowEditor.value().steps[0])
+  await page.locator('#flow-graph').click()
+  await page
+    .locator('.flow-graph-tree > .flow-insert')
+    .last()
+    .getByRole('button')
+    .click()
+  await page.locator('[data-create-kind=loop]').click()
+  await page.locator('[data-field=limit]').fill('2')
+  await page.locator('[data-graph-fit]').click()
+  await page.locator('#flow-canvas').scrollIntoViewIfNeeded()
+  const start = await page
+    .locator(`.flow-block[data-node-id="${original.id}"] .flow-drag-handle`)
+    .boundingBox()
+  const destination = await page
+    .locator('.flow-block[data-kind=loop] .flow-branch > .flow-insert')
+    .boundingBox()
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(
+    destination.x + destination.width / 2,
+    destination.y + destination.height / 2,
+    { steps: 8 }
+  )
+  await page.mouse.up()
+  await page.locator('#save-test').click()
+  await expect(page.locator('#message')).toContainText('Teste salvo')
+  await page.reload()
+  await page.getByRole('link', { name: /Testes salvos/ }).click()
+  await page
+    .getByRole('button', { name: `Carregar ${name}`, exact: true })
+    .click()
+  await expect(page.locator('#message')).toContainText('Teste carregado')
+  const saved = await page.evaluate(() => flowEditor.value())
+  expect(saved.steps).toHaveLength(1)
+  expect(saved.steps[0].limit).toBe(2)
+  expect(saved.steps[0].children[0].id).toBe(original.id)
+  expect(saved.steps[0].children[0].url).toBe(original.url)
+  const before = received
+  const started = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/runs/check') &&
+      response.request().method() === 'POST'
+  )
+  await page.locator('#check-once').click()
+  const response = await started
+  expect(response.ok()).toBe(true)
+  const run = await response.json()
+  // Await this run rather than a status label left over from an earlier test.
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/runs/${run.id}`)).json()).result
+          ?.passed,
+      { timeout: 20000 }
+    )
+    .toBe(true)
+  await expect(page.locator('#status')).toHaveText('Fluxo aprovado', {
+    timeout: 20000,
+  })
+  expect(received - before).toBe(2)
+})
