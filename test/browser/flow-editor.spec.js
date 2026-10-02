@@ -46,6 +46,75 @@ async function drag(page, source, destination, cancel = false) {
 }
 const value = (page) => page.evaluate(() => flowEditor.value())
 
+test('explains how an extracted collection becomes ITEM inside its loop', async ({
+  page,
+}) => {
+  await openGraph(page, [
+    request('list', 'Buscar lista'),
+    {
+      id: 'items',
+      type: 'loop',
+      name: 'Percorrer lista',
+      mode: 'items',
+      variable: 'PRODUTOS',
+      limit: 100,
+      children: [
+        {
+          id: 'group',
+          type: 'group',
+          name: 'Detalhes',
+          children: [request('detail', 'Buscar detalhe')],
+        },
+      ],
+    },
+  ])
+  const configure = async (id) => {
+    await closeConfig(page)
+    await block(page, id)
+      .locator(':scope > .flow-block-head > .flow-node')
+      .click()
+  }
+  const describedHelp = async (field) => {
+    const id = await page
+      .locator(`[data-field=${field}]`)
+      .getAttribute('aria-describedby')
+    return page.locator(`[id="${id}"]`)
+  }
+  await configure('list')
+  await page.locator('[data-field=extractPath]').fill('verticalList')
+  await page.locator('[data-field=extractVariable]').fill('AGENDA')
+  await expect(await describedHelp('extractPath')).toContainText(
+    'informe AGENDA, sem chaves'
+  )
+  // A request outside the loop should not claim that ITEM is available in its URL.
+  await expect(page.locator('[data-field=url]')).not.toHaveAttribute(
+    'aria-describedby'
+  )
+  await configure('items')
+  await page.locator('[data-field=variable]').fill('AGENDA')
+  await expect(await describedHelp('variable')).toContainText(
+    'cria ITEM automaticamente'
+  )
+  await expect(await describedHelp('variable')).toContainText(
+    '8958 na primeira volta e 8959 na segunda'
+  )
+  await configure('detail')
+  await expect(await describedHelp('url')).toContainText(
+    'uma vez para cada item de AGENDA'
+  )
+  await page
+    .locator('[data-field=url]')
+    .fill('{{CMS_PROD}}/api/v10/schedules/{{ITEM.id}}')
+  const flow = await value(page)
+  expect(flow.steps[0].extract).toMatchObject({
+    path: 'verticalList',
+    variable: 'AGENDA',
+  })
+  expect(flow.steps[1].children[0].children[0].url).toBe(
+    '{{CMS_PROD}}/api/v10/schedules/{{ITEM.id}}'
+  )
+})
+
 test('graph creates at the chosen point and moves a configured request into and out of a loop', async ({
   page,
 }) => {

@@ -112,6 +112,30 @@ window.FlowEditor = class FlowEditor {
         }
     }
   }
+  enclosingLoop(id, nodes = this.flow[this.phase], loop = null) {
+    for (const node of nodes) {
+      if (node.id === id) return loop
+      for (const key of ['children', 'then', 'else']) {
+        if (!node[key]) continue
+        const found = this.enclosingLoop(
+          id,
+          node[key],
+          node.type === 'loop' ? node : loop
+        )
+        if (found) return found
+      }
+    }
+    return null
+  }
+  fieldHelp(parent, inputs, text) {
+    const help = document.createElement('p')
+    help.id = `flow-help-${this.id()}`
+    help.className = 'flow-context-help'
+    help.textContent = text
+    for (const input of inputs) input.setAttribute('aria-describedby', help.id)
+    parent.append(help)
+    return help
+  }
   checkpoint() {
     this.history.push(JSON.stringify(this.flow))
     if (this.history.length > 60) this.history.shift()
@@ -490,7 +514,14 @@ window.FlowEditor = class FlowEditor {
           (v) => [v, v]
         )
       )
-      this.field(parent, n, 'url', 'URL')
+      const url = this.field(parent, n, 'url', 'URL')
+      const loop = this.enclosingLoop(n.id)
+      if (loop?.mode === 'items')
+        this.fieldHelp(
+          parent,
+          [url],
+          `Esta requisição roda uma vez para cada item de ${loop.variable || 'sua coleção'}. O loop cria ITEM automaticamente com o item atual: use {{ITEM.id}} para seu ID ou {{ITEM}} se a lista contiver apenas valores. Exemplo: /api/itens/{{ITEM.id}}. {{INDEX}} é a posição do item, começando em 0. Essas variáveis ficam disponíveis nos passos dentro da repetição.`
+        )
       const header = {
         headers: (n.headers || [])
           .map((h) => `${h.key}: ${h.value}`)
@@ -530,6 +561,13 @@ window.FlowEditor = class FlowEditor {
         extractPath: n.extract?.path || '',
         extractVariable: n.extract?.variable || '',
       }
+      const extractionInputs = []
+      let extractionHelp
+      const explainExtraction = () => {
+        const path = simple.extractPath || 'verticalList'
+        const variable = simple.extractVariable || 'PRODUTOS'
+        extractionHelp.textContent = `Para percorrer uma lista, extraia o campo inteiro (ex.: ${path}) e salve em uma variável (ex.: ${variable}). Depois adicione uma Repetição → Itens de uma coleção e informe ${variable}, sem chaves. Dentro dela, ITEM será cada elemento da lista: use {{ITEM.id}} na próxima requisição. Para extrair apenas o primeiro ID, use verticalList.0.id. O caminho usa pontos, sem colchetes.`
+      }
       for (const [key, label] of [
         ['jsonPath', 'Campo JSON'],
         ['jsonValue', 'Valor esperado (JSON)'],
@@ -537,6 +575,7 @@ window.FlowEditor = class FlowEditor {
         ['extractVariable', 'Salvar na variável'],
       ]) {
         const input = this.field(parent, simple, key, label)
+        if (key.startsWith('extract')) extractionInputs.push(input)
         input.oninput = () => {
           this.checkpoint()
           simple[key] = input.value
@@ -558,9 +597,12 @@ window.FlowEditor = class FlowEditor {
               variable: simple.extractVariable,
             }
           else delete n.extract
+          explainExtraction()
           this.changed()
         }
       }
+      extractionHelp = this.fieldHelp(parent, extractionInputs, '')
+      explainExtraction()
       this.ruleEditor(parent, n, 'checks', 'Validações adicionais')
       this.ruleEditor(parent, n, 'extracts', 'Extrações adicionais')
       this.field(
@@ -602,13 +644,35 @@ window.FlowEditor = class FlowEditor {
         this.render()
       }
       this.field(parent, n, 'limit', 'Limite obrigatório (1–1000)', 'number')
-      if (n.mode === 'items')
-        this.field(parent, n, 'variable', 'Variável da coleção')
+      if (n.mode === 'items') {
+        const collection = this.field(
+          parent,
+          n,
+          'variable',
+          'Variável da coleção'
+        )
+        collection.placeholder = 'Ex.: PRODUTOS (sem {{ }})'
+        const help = this.fieldHelp(parent, [collection], '')
+        const explainCollection = () => {
+          help.textContent = `Use o nome da variável em que você salvou a lista na requisição anterior (ex.: ${n.variable || 'PRODUTOS'}), sem {{ }}. A repetição cria ITEM automaticamente com um elemento por vez. Se a lista for [{"id":8958},{"id":8959}], {{ITEM.id}} será 8958 na primeira volta e 8959 na segunda. Adicione a requisição de detalhe dentro desta repetição e use {{ITEM.id}} na URL ou no corpo. {{INDEX}} indica a posição, começando em 0. Se a lista estiver vazia, os passos internos não executam.`
+        }
+        const updateCollection = collection.oninput
+        collection.oninput = () => {
+          updateCollection()
+          explainCollection()
+        }
+        explainCollection()
+      }
+      this.fieldHelp(
+        parent,
+        [],
+        'O limite é o máximo de itens ou voltas a executar. Se a lista tiver mais itens que esse valor, apenas os primeiros serão percorridos.'
+      )
       if (n.mode === 'while') this.condition(parent, n)
     } else if (n.type === 'condition') this.condition(parent, n)
     const help = document.createElement('small')
     help.textContent =
-      'Variáveis: {{TOKEN}}, {{ITEM.id}}, {{INDEX}}. O loop e cada usuário possuem seu próprio contexto.'
+      'Para usar uma variável salva por uma requisição anterior, escreva seu nome entre chaves duplas, como {{TOKEN}}. Cada usuário mantém seus próprios valores.'
     parent.append(help)
   }
   condition(parent, n) {
@@ -1505,7 +1569,9 @@ window.FlowEditor = class FlowEditor {
           hint.className = 'flow-branch-hint'
           hint.textContent =
             node.type === 'loop'
-              ? 'Estes passos executam a cada volta. Use + ou arraste um bloco para dentro.'
+              ? node.mode === 'items'
+                ? `Um item de ${node.variable || 'sua coleção'} por volta. Nos passos abaixo, use {{ITEM.id}} para o ID do item atual. Use + ou arraste um bloco para dentro.`
+                : 'Estes passos executam a cada volta. Use + ou arraste um bloco para dentro.'
               : 'Estes passos executam em sequência. Use + ou arraste um bloco para dentro.'
           nested.append(title, hint)
           paint(node.children, nested)
