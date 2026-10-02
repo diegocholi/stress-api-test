@@ -138,6 +138,64 @@ test('simple rules survive repeated saves without creating additional rules', as
   await expect(checks.locator('[data-field=operator]')).toHaveValue('exists')
   await expect(page.locator('[data-field=expectedStatus]')).toHaveValue('201')
 })
+test('additional token extractions remain visible after saving and reloading', async ({
+  page,
+}) => {
+  const name = 'Login com extrações adicionais'
+  page.on('dialog', (dialog) => dialog.accept())
+  await configure(page, name)
+  const rules = [
+    { source: 'json', path: 'data.token', variable: 'TOKEN', scope: 'journey' },
+    {
+      source: 'header',
+      path: 'X-Session',
+      variable: 'SESSION',
+      scope: 'session',
+      secret: true,
+    },
+  ]
+  // Existing saved flows have canonical extractions without editor metadata.
+  await page.evaluate((extracts) => {
+    const flow = flowEditor.value()
+    flow.steps[0].extracts = extracts
+    flowEditor.load(flow)
+  }, rules)
+  for (let i = 0; i < 2; i++) {
+    const rows = page.locator('fieldset[data-field=extracts] .flow-rule')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.first().locator('[data-field=variable]')).toHaveValue(
+      'TOKEN'
+    )
+    await expect(rows.first().locator('[data-field=path]')).toHaveValue(
+      'data.token'
+    )
+    await expect(rows.last().locator('input[type=checkbox]')).toBeChecked()
+    await expect(page.locator('[data-field=extractVariable]')).toHaveValue('')
+    const response = page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/templates') &&
+        res.request().method() === 'POST'
+    )
+    await page.locator('#save-test').click()
+    expect((await response).ok()).toBe(true)
+    const templates = await (await page.request.get('/api/templates')).json()
+    const item = templates.find((t) => t.name === name)
+    const detail = await (
+      await page.request.get(`/api/templates/${item.id}`)
+    ).json()
+    expect(detail.definition.scenario.steps[0].extracts).toEqual(rules)
+    await page.reload()
+    await page.getByRole('link', { name: /Testes salvos/ }).click()
+    await page
+      .getByRole('button', { name: `Carregar ${name}`, exact: true })
+      .click()
+    await expect(page.locator('#message')).toContainText('Teste carregado')
+  }
+  await expect(
+    page.locator('fieldset[data-field=extracts] .flow-rule')
+  ).toHaveCount(2)
+})
+
 test('saved configuration executes, exports XLSX and restores historical charts after reload', async ({
   page,
 }) => {

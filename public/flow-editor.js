@@ -208,10 +208,12 @@ window.FlowEditor = class FlowEditor {
       (r) => r.source === 'json' && r.operator === 'equals',
       (r) => ({ path: r.path, value: r.value })
     )
+    // Additional extractions can match the simple fields; preserve their placement.
     restore(
       'extracts',
       'extract',
       (r) =>
+        r.editorField === 'extract' &&
         r.source === 'json' &&
         (r.scope || 'journey') === 'journey' &&
         !r.secret,
