@@ -50,9 +50,9 @@ test('builder validates variable availability in order and JSON template structu
   assert.throws(()=>validate({...base([{...step,bodyType:'json',body:'{ invalid {{VALUE}}'}]),scenario:{variables:[{key:'VALUE',value:'1'}],steps:[{...step,bodyType:'json',body:'{ invalid {{VALUE}}'}]}}),/JSON inválido/);
   assert.doesNotThrow(()=>validate(base([{...step,extract:{path:'id',variable:'ID'}},{...step,bodyType:'json',body:'{"id":{{ID}}}'}])));
 });
-test('JSON is validated after substitution and malformed runtime data is never sent',async t=>{
+test('JSON templates serialize dynamic quotes safely before sending',async t=>{
   let received=0;const server=http.createServer((_req,res)=>{received++;res.end('ok');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const input=base([{method:'POST',url:`http://127.0.0.1:${server.address().port}`,bodyType:'json',body:'{"value":"{{VALUE}}"}'}]);
   input.singleRun=true;input.scenario.variables=[{key:'VALUE',value:'unescaped"quote'}];
-  const result=await new Runner(input).start();assert.equal(received,0);assert.equal(result.requests,0);assert.ok(result.assertionFailures>0,JSON.stringify(result));assert.equal(result.passed,false);
+  const result=await new Runner(input).start();assert.equal(received,1);assert.equal(result.requests,1);assert.equal(result.assertionFailures,0,JSON.stringify(result));assert.equal(result.passed,true);
 });

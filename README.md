@@ -1,218 +1,117 @@
-# Stress Lab
+# Stress Lab 2 · k6
 
-Gerador de carga HTTP real com editor de cenários pela interface, importação Postman, agendamento e resultados exportáveis. Requer Node.js 18+.
+Criação visual de jornadas HTTP/HTTPS, execução local com k6, agenda, evidências e relatórios XLSX. A interface usa Node.js; o tráfego é produzido por um processo k6 separado. Postman/Newman foram descontinuados.
+
+## Iniciar
+
+Requer Node.js 22+ e k6 2.x. Instale uma distribuição oficial do k6 conforme https://grafana.com/docs/k6/latest/set-up/install-k6/. O projeto não baixa nem instala o binário automaticamente. Use `K6_BIN=/caminho/do/k6` quando ele não estiver no PATH.
 
 ```bash
 npm start
 ```
 
-Esse comando instala as dependências automaticamente quando necessário e inicia a interface. Na primeira execução, é necessário acesso à internet.
+Abra http://127.0.0.1:3000. Dependências Node ausentes são instaladas pelo comando inicial. Para outra porta, use `PORT=3001 npm start`. O servidor informa a versão do k6 na configuração e dá uma mensagem acionável quando o binário está ausente.
 
-Abra http://127.0.0.1:3000. A configuração tem duas abas:
+## Criar uma jornada
 
-- **Criar pela interface**: monte uma sequência de requisições com método, URL, headers e corpo JSON ou texto. Adicione, remova e reordene os passos. Defina status esperado, texto que a resposta deve conter e campos JSON com valores esperados. Nenhum arquivo Postman é necessário.
-- **Postman**: envie uma collection v2/v2.1 e, opcionalmente, um environment.
+O editor possui lista acessível por teclado e fluxograma com organização automática, seleção, zoom, desfazer e refazer. A ordem da árvore define a execução; posições visuais não alteram o cenário. Configure **Cenário → Carga → Critérios → Revisão**.
 
-As duas abas usam os mesmos estágios, timeouts, pausa entre cenários, threads, métricas e critérios de aprovação. Escolha **Iniciar agora** ou **Agendar**, com data futura e fuso exibido na tela.
+Blocos disponíveis:
 
-No editor, variáveis são escritas uma por linha (`BASE_URL=http://127.0.0.1:4000`) e headers como `Authorization: Bearer {{TOKEN}}`. Use `{{NOME}}` na URL, nos headers e no corpo. Para um fluxo de login, extraia o campo `data.token` da resposta e salve em `TOKEN`; os próximos passos podem usar `{{TOKEN}}`. A extração vale dentro da execução do cenário de cada usuário. Caminhos JSON usam pontos, inclusive índices de arrays (`items.0.id`), e valores esperados usam sintaxe JSON (`123`, `true`, `"texto"`).
+- **Requisição:** método, URL, headers, JSON/texto/formulário, múltiplas validações e extrações, timeout próprio e até cinco novas tentativas.
+- **Condição:** variável, operador e caminhos verdadeiro/falso.
+- **Repetição:** quantidade, itens de um array ou condição; limite obrigatório de 1–1000. O editor não aceita ciclos livres.
+- **Pausa:** duração fixa ou intervalo aleatório, até 60 segundos.
+- **Grupo:** reúne passos e mede sua duração como uma transação.
 
-A agenda e o histórico persistem em `.runs/`, ignorado pelo Git. O servidor precisa estar ligado para executar os agendamentos. Um teste roda por vez; agendamentos sobrepostos entram na fila. Ao reiniciar, testes interrompidos são marcados como falha e agendamentos pendentes voltam à fila. A interface permite cancelar e baixar o relatório XLSX ao terminar. Collections e environments de testes pendentes são armazenados localmente com permissões restritas e removidos dos metadados públicos ao encerrar; a configuração privada é preservada para repetição. Não use o histórico para compartilhar credenciais.
+O seletor de fases oferece preparação global, preparação por usuário, jornada e limpeza global. Preparação por usuário acontece uma vez para cada VU utilizado. Sessões não são compartilhadas entre usuários. A limpeza global recebe somente os dados da preparação global; não recebe o estado privado de cada usuário. Encerramento forçado pode impedir a limpeza e deixa a execução parcial.
 
-## Configuração, acompanhamento e resultados
+Variáveis iniciais usam uma linha `NOME=valor`. Nas requisições, escreva `{{TOKEN}}`, `{{ITEM.id}}` ou `{{INDEX}}`. Extrações mantêm tipos JSON. Em loops de itens, `ITEM` representa o item e `INDEX` seu índice. Valores inseridos em corpos JSON são escapados e serializados, incluindo aspas em textos e números fora de aspas.
 
-A navegação separa o editor, o acompanhamento e a leitura final. Requisições podem ser recolhidas ou duplicadas, e a prévia mostra os degraus de carga. Erros indicam o campo e direcionam o foco. Variáveis do editor precisam existir na configuração inicial, entre as quatro variáveis dinâmicas ou em uma extração de passo anterior. Corpos JSON são conferidos novamente após a substituição, antes do envio; um corpo inválido é registrado como validação reprovada e não é enviado.
+Dados CSV/JSON permitem selecionar uma linha por usuário ou por iteração. CSV tem cabeçalho; JSON é um array de objetos. Escolha explicitamente falhar ou reutilizar linhas quando os dados acabarem. Até 10.000 linhas e 5 MB por arquivo.
 
-- **Validar configuração:** confere a definição sem fazer requisições à API.
-- **Executar uma vez:** executa o cenário completo uma única vez com um usuário, incluindo scripts e validações. Essa verificação gera histórico e XLSX, mas não comprova capacidade de carga. Repeti-la mantém a finalidade funcional.
-- **Acompanhamento:** gráficos de usuários observados/alvo, RPS, p95 e falhas HTTP por janela, com horários reais e consulta por mouse ou teclado. A evolução é recuperada ao recarregar ou selecionar uma execução concluída. Execuções antigas sem série mostram essa ausência explicitamente.
-- **Resultados:** critérios, evidência de carga por estágio, conferência dos registros, categorias de falha e endpoints com maior p95. A comparação usa uma execução de referência e a selecionada; diferenças de configuração e metodologia são exibidas sem revelar headers, corpos ou credenciais.
+A jornada para ao falhar por padrão. Desmarque a opção para continuar. Falhas de tentativas anteriores permanecem registradas, inclusive quando uma nova tentativa funciona. Headers e valores de variáveis não aparecem nos relatórios; marque extrações sensíveis para ocultar valores no diagnóstico funcional. Tokens e credenciais conhecidos também são ocultados.
 
-O histórico tem busca, filtros e páginas de 20 execuções. As atualizações preservam o foco dos controles. O layout funciona em telas estreitas e com zoom de 200%.
+**Validar configuração** não faz tráfego. **Executar uma vez** usa um VU e uma jornada, exibe os passos percorridos e não comprova capacidade de carga. Condições não percorridas e passos interrompidos aparecem como ignorados.
 
-## Aprovação e evidência
+## Carga e metodologia 4.0
 
-Novos testes usam metodologia **3.0**, com os limites iniciais configuráveis de **100 respostas com latência por estágio** e **90% da carga planejada em cada estágio com alvo positivo**. O mínimo de respostas não é garantia estatística; o tamanho da amostra acompanha os percentis.
+Perfis: carga constante, stress progressivo, pico e longa duração. Estágios podem ser degraus ou rampas. Degraus são compilados com transições de 1 ms, descontadas da duração do estágio. Modelos:
 
-A carga é calculada em usuários-segundo: tempo efetivo de alocação de cada usuário dentro do estágio dividido por duração planejada × alvo. Em cada instante, usuários acima do alvo não compensam períodos abaixo do alvo. Usuários em pausa continuam alocados; esse indicador não representa requisições HTTP simultâneas. A interface distingue usuários alocados, cenários em execução e usuários em pausa.
+- **Usuários concorrentes:** cada VU repete uma jornada. A API mais lenta reduz a taxa de novas jornadas.
+- **Taxa de chegada:** controla inícios de jornadas/s. Uma jornada com três chamadas não equivale a três chegadas. O k6 registra iterações descartadas quando faltam VUs.
 
-- **Aprovado:** execução concluída, evidência suficiente, critérios de performance cumpridos, validações/scripts/execuções sem falhas e registros íntegros.
-- **Reprovado:** evidência suficiente, mas algum critério de performance ou validação falhou.
-- **Inconclusivo:** execução concluída com carga ou volume de respostas insuficiente. Critérios que falharam continuam visíveis.
-- **Parcial:** cancelamento, interrupção ou perda/incerteza dos registros. Nunca aprova, mesmo com respostas rápidas e contagens coincidentes.
+O limite continua em 500 VUs simultâneos. Preparação, aquecimento e limpeza ficam fora dos critérios de performance. Drenagem permite concluir jornadas iniciadas, dentro do prazo configurado. A geração XLSX acontece após a medição.
 
-Durante a execução, a avaliação é provisória. O campo público `passed` só é verdadeiro para uma avaliação final aprovada. Quando um worker precisa ser encerrado à força, tentativas pendentes conhecidas são registradas como interrompidas; buffers que não tiveram flush completo impedem declarar integridade.
+A metodologia separa:
 
-Definições antigas sem versão preservam seu prazo global anterior (duas vezes o timeout da requisição) e usam mínimo de uma resposta e cumprimento mínimo de carga de 0%. Histórico antigo conserva a metodologia original; valores não registrados não são estimados.
+- **Duração HTTP:** `http_req_duration` do k6, envio + espera + recebimento; exclui DNS, abertura de conexão e TLS.
+- **Tempo total da chamada:** relógio do wrapper, incluindo preparação de conexão e execução da chamada.
+- **Duração da jornada/bloco:** inclui requisições, processamento e pausas internas; pausa entre jornadas fica fora dessa duração.
+- **Sucesso HTTP:** resposta conforme o status configurado ou, na ausência de regra, HTTP abaixo de 400, sem erro de transporte.
+- **Sucesso funcional:** validações e extrações obrigatórias aprovadas e jornada concluída sem falha.
 
-## Timeouts e drenagem
+Todas as tentativas, incluindo redirects e novas tentativas, são registradas. Percentis usam nearest rank em histograma de 1 ms; HTTP tem teto de 600.000 ms, jornadas não. Somente respostas com latência entram nos percentis HTTP; timeouts sem resposta entram nas falhas. Percentis não são médias de percentis.
 
-Requisição, script e cenário têm limites separados. Em novas definições, o timeout do script começa com o mesmo valor da requisição, e o timeout total do cenário é **0**, sem limite global. Configure um prazo global quando necessário. Assim, um fluxo longo pode concluir se cada requisição/script respeitar seu limite.
+A carga concorrente é conferida pela integração de observações de VUs ativos da API local do k6, consultada a cada 100 ms. Lacunas iniciais não são preenchidas. Essa evidência é amostrada, não equivale a requisições simultâneas. Em chegada, o planejamento usa o integral do perfil arredondado para cima, compatível com partidas na origem; inícios e descartes reais são registrados separadamente.
 
-O prazo de drenagem limita o tempo para terminar os cenários em andamento depois de parar a carga. Seu default no motor é duas vezes o maior timeout de requisição/script mais 3 segundos; a interface inicia com 23.000 ms e permite alterá-lo. Carga e drenagem têm durações e throughput separados. O RPS global continua incluindo ambas, e a geração do XLSX fica fora da medição.
+CPU e memória dos processos Node e k6 ajudam a identificar interferência do gerador; não medem a API. A CPU do k6 é obtida com `ps` em macOS/Linux e pode estar indisponível. Três observações consecutivas de atraso do coletor acima do limite configurado tornam a evidência inconclusiva. O detector não prova ausência de interferência; consulte a calibração.
 
-## Salvar e reutilizar testes
+Resultados:
 
-Use **Salvar teste** no editor para guardar um cenário completo na biblioteca **Testes salvos**. A biblioteca permite buscar pelo nome, carregar, duplicar e excluir. Ao carregar, o formulário recupera as requisições, variáveis, headers, corpo, validações, estágios, limites e opções. Para Postman, recupera também a collection e o environment; não é preciso selecionar os arquivos novamente.
+- **Aprovado:** execução final, carga/amostra suficientes, critérios cumpridos e registros íntegros.
+- **Reprovado:** evidência suficiente, mas falha de performance ou funcional.
+- **Inconclusivo:** amostra/carga insuficientes ou interferência detectada do coletor.
+- **Parcial:** cancelamento, interrupção ou divergência/perda de registros.
 
-**Salvar alterações** atualiza o teste carregado. **Salvar como novo** cria outro registro a partir da configuração do editor. A aplicação sinaliza alterações não salvas e detecta edições concorrentes em outras abas, impedindo sobrescritas silenciosas. **Novo teste** limpa o editor.
+Defaults: p95 HTTP 1000 ms, falhas HTTP 1%, 100 respostas por estágio e cumprimento mínimo de carga 90%. Há p95 opcional por passo e por jornada. A verificação funcional usa prazo máximo de 24 horas do executor quando não há prazo próprio. Volume mínimo não garante confiança estatística. Histórico anterior conserva sua metodologia; repetir um teste convertido cria uma nova execução 4.0, identificada como k6. Comparações entre metodologias/motores recebem ressalvas.
 
-Os testes ficam em `.runs/templates/`, em arquivos locais com permissões restritas, e continuam disponíveis após reiniciar o servidor. A definição inclui os valores configurados, como tokens e headers necessários à execução; esse diretório está fora do Git. Salvar ou carregar não executa requisições. A data de agendamento é definida a cada execução e não é reaplicada ao carregar um teste. Excluir um teste salvo preserva o histórico de execuções e os relatórios XLSX.
+## Biblioteca e migração
 
-## Experimentar com uma API local
+Testes, agenda, histórico e configurações privadas ficam em `.runs/`, fora do Git. Salvar e carregar não executa a API. Há controle de revisão para evitar sobrescritas entre abas. Uma execução roda por vez; agendamentos entram na fila e exigem que o servidor esteja ligado.
 
-Em um terminal:
+Definições antigas compatíveis são convertidas ao carregar: requisições, variáveis/environment, bearer e verificações simples de status. O formato do editor anterior preserva suas extrações e validações. Scripts Postman arbitrários, autenticações não reconhecidas e corpos não suportados geram diagnóstico e bloqueiam a conversão. Originais são preservados. A conversão não tenta executar scripts para descobrir seu efeito.
+
+Agendamentos incompatíveis ficam em `migration-required`, sem execução automática. Histórico e XLSX antigos continuam disponíveis. Para diagnosticar uma definição, envie-a a `POST /api/migrate`; a resposta traz `compatible`, `issues`, `warnings` e, quando possível, `definition`. Isso é uma ferramenta de migração, não um novo modo Postman.
+
+## Resultados e XLSX
+
+A interface oferece resumo, jornadas/passos, carga/gerador e eventos de falha. A comparação possui download XLSX separado, com métricas e diferenças de configuração, inclusive após a retenção dos eventos detalhados. Eventos podem ser filtrados por passo; o diagnóstico funcional inclui extrações com valores sensíveis ocultos.
+
+XLSX inclui **Resumo, Configuração, Fluxo, Passos, Jornadas, Cenários, Gerador, Estágios, Endpoints, Evolução, HTTP, Usuários, Critérios, Integridade, Validações, Falhas e Requisições**, com gráficos editáveis, filtros e cabeçalhos congelados. Abas detalhadas são divididas automaticamente no limite do Excel; nenhuma tentativa é amostrada para caber no relatório. Requisições possuem IDs de jornada, passo e tentativa, fase, estágio e timings HTTP/total/TTFB/conexão/TLS.
+
+A avaliação e as agregações são compartilhadas pela tela e pelo XLSX. Eventos detalhados comprimidos são preservados por sete dias e verificados por SHA-256. **Regenerar XLSX** não executa a API. Perda de eventos, divergência com contadores nativos do k6, sequências inválidas e encerramentos pendentes impedem aprovação.
+
+## CLI e API
 
 ```bash
 npm run demo:target
+node load-runner.js --scenario=examples/native-flow.json --xlsx=relatorio.xlsx
 ```
 
-Em outro, execute `npm start`. Na aba **Criar pela interface**, informe `GET http://127.0.0.1:4000/health` com status esperado `200`. Para experimentar a aba **Postman**, selecione os dois JSON de `examples/`. A collection verifica `GET /health` na API de exemplo, sem acessar serviços externos.
+CLI aceita `--stages`, `--loadModel`, `--timeout`, `--minResponses`, `--minLoadPercent`, `--p95` e `--errorRate` como overrides. Retorna 0 somente para execução concluída/aprovada com XLSX gerado. `--collection` e `--environment` foram retirados.
 
-## Linha de comando
+Rotas existentes de execução, biblioteca, agenda, comparação, séries, repetição e regeneração continuam disponíveis. Novas interfaces:
 
-```bash
-node load-runner.js \
-  --collection=examples/local.postman_collection.json \
-  --environment=examples/local.postman_environment.json \
-  --stages="10:2,20:5,5:0" \
-  --maxWorkers=2 \
-  --timeout=10000 \
-  --scriptTimeout=10000 \
-  --scenarioTimeout=0 \
-  --drainTimeout=23000 \
-  --minResponses=100 \
-  --minLoadPercent=90 \
-  --thinkTime=0 \
-  --keepAlive=true \
-  --p95=1000 \
-  --errorRate=1 \
-  --xlsx=relatorio.xlsx
-```
+| Rota | Resultado |
+|---|---|
+| `GET /api/engine` | Disponibilidade e versão do k6 |
+| `POST /api/migrate` | Diagnóstico e conversão conservadora |
+| `POST /api/validate` | Validação sem tráfego; erro com `nodeId`, `field` e índice quando aplicável |
+| `GET /api/runs/:id/events?page=1&pageSize=50&nodeId=id&type=request&stage=1` | Eventos paginados; limite 100 por página |
 
-O CLI imprime snapshots JSON e retorna código 0 somente quando o teste conclui e passa nos critérios. SIGINT/SIGTERM cancela e preserva métricas parciais. `--iters` foi removido: cada usuário repete a collection durante o estágio. Não há limite de iterações que esvazie a carga antes do tempo. Variáveis `VU_ID`, `VU_ITER`, `UNIQUE_ID` e `UNIQUE_EMAIL` estão disponíveis como dados da iteração.
+Definições novas têm `schemaVersion: 4`, `engine: "k6"`, `scenario` com `setup`, `perUser`, `steps`, `teardown` e variáveis/dataset opcionais. Condições usam `condition: {variable, operator, value}` e `then`/`else`. Loops usam `mode`, `limit`, `variable` ou `condition`, e `children`. Posições visuais não fazem parte da definição executável.
 
-## Executar novamente
-
-O painel de resultados tem **Executar novamente** ao lado de **Baixar relatório XLSX**. Uma nova execução usa a configuração registrada no teste anterior, inicia imediatamente e cria um novo item no histórico com seu próprio relatório. O agendamento anterior não é reaplicado. A configuração original permanece disponível mesmo se o teste salvo for editado ou excluído.
-
-Execuções antigas que não registraram essa configuração mostram um seletor de testes salvos antes do botão. Nesse caso, escolha explicitamente o teste da biblioteca que deseja executar. A aplicação nunca tenta reconstruir requisições a partir do relatório.
-
-As configurações das execuções ficam em `.runs/inputs/`, em arquivos locais com permissões restritas, junto ao histórico. Incluem os dados necessários para repetir as requisições, como os testes salvos.
-
-## Relatório final XLSX
-
-Ao encerrar o teste, a interface prepara o arquivo e libera **Baixar relatório XLSX**. O arquivo inclui:
-
-- **Resumo:** painel executivo com indicadores, veredito e motivos, carga/drenagem, principais pontos de atenção e integridade dos registros e quatro gráficos nativos editáveis (RPS, p95, usuários e HTTP), quando existem dados.
-- **Critérios e Integridade:** todos os critérios, incluindo amostra e cumprimento por estágio, e conferência independente de tentativas, validações, scripts e execuções.
-- **Configuração:** versões da ferramenta/metodologia, nome, origem, identificador, datas UTC de criação/agendamento/execução, parâmetros, critérios, versão do Node e motivo de encerramento. Credenciais e valores de variáveis não são exportados.
-- **Estágios:** carga planejada, início/fim reais, duração, usuários-segundo e cumprimento observado. Estágios não iniciados e drenagem são identificados.
-- **Endpoints:** tentativas, falhas, transporte, taxa de falhas, bytes recebidos, mínimo, média, p50/p90/p95/p99 e máximo, ordenados por p95.
-- **Evolução:** RPS por janela, concorrência observada, alvo, latências e telemetria de CPU, memória e event loop do gerador/threads. Janelas de 1 segundo, ampliadas para manter até cerca de 3.600 pontos em execuções longas.
-- **HTTP:** distribuição de códigos e métricas por código; zero significa ausência de resposta.
-- **Usuários:** tentativas, iterações observadas e métricas por usuário virtual.
-- **Validações:** todas as assertions, com aprovação/reprovação/ignorada e mensagem.
-- **Falhas:** ocorrências HTTP, transporte, assertions, scripts e execuções, com contexto.
-- **Requisições:** todas as tentativas, com horários UTC de início/fim, estágio, usuário, iteração, nome, método, URL, status, latência, bytes e erro.
-- **Metodologia:** definições, critérios, escopo, integridade e limitações da coleta.
-
-Abas detalhadas têm filtros, cabeçalhos congelados, linhas alternadas, formatos numéricos e destaque de falhas. Elas são divididas automaticamente ao atingir o limite de linhas do Excel. Não há amostragem das tentativas. Corpos e headers não são incluídos; credenciais de URL e valores de query são ocultos. Mensagens de validação vêm dos scripts da collection; valores conhecidos de credenciais também são ocultos. Conteúdo sensível arbitrário produzido por scripts pode não ser reconhecido.
-
-Testes cancelados ou interrompidos geram um relatório identificado como parcial. A interface mostra erros de geração separadamente das falhas da API. Na metodologia 3.0, os eventos detalhados são comprimidos, verificados por SHA-256 e preservados por sete dias; a limpeza ocorre quando o servidor está ocioso. Definições 2.0 mantêm a remoção após geração íntegra; metadados e série temporal permanecem para consulta. Em caso de falha, **Regenerar XLSX** reutiliza os registros sem executar a API novamente. A regeneração aguarda qualquer teste ativo para não interferir na medição. Duplicidades, lacunas de lotes, partidas não encerradas e linhas JSON truncadas aparecem como falha de integridade, com resultado parcial. Relatórios CSV do histórico anterior são convertidos para XLSX no download, indicando os campos que não existiam naquela versão.
-
-O CLI também gera XLSX automaticamente; use `--xlsx=relatorio.xlsx` para escolher o destino. O antigo `--csv` foi substituído. `npm start` e `pnpm start` instalam as novas dependências quando necessário.
-
-## Como a medição funciona
-
-- Modelo fechado: cada usuário executa uma collection por vez e a repete. Threads hospedam vários usuários assíncronos. `maxWorkers` limita realmente o total de threads (1–32); o limite de usuários é 500 por estágio.
-- Estágios permitem degraus ou rampas lineares. O modelo padrão usa concorrência; o modelo de chegada usa cenários/s. Inicialização leva tempo; acompanhe usuários ativos versus alvo. Reduções deixam as collections em andamento terminar. Ao final, há drenagem limitada por prazo. Cancelar impede novas execuções e aguarda as collections em andamento, dentro do prazo de encerramento.
-- Um único evento Newman `request` contabiliza tentativas HTTP concluídas, incluindo `pm.sendRequest`, respostas e falhas de transporte. Tentativas pendentes conhecidas são registradas como interrompidas quando um worker precisa ser encerrado à força. Não há soma duplicada com `summary.run.executions`.
-- HTTP ≥400 e falhas de transporte contam como requisições com falha. Assertions, scripts e erros de execução têm contadores próprios; qualquer falha nesses contadores reprova o teste. Taxa HTTP = requisições com falha / total de tentativas, sem misturar a quantidade de assertions.
-- p50/p95/p99 vêm exclusivamente do `responseTime` das requisições com resposta. Timeouts sem resposta entram na taxa de falhas, sem uma latência inventada. Histograma com resolução de 1 ms e teto de 600.000 ms; não usa amostragem enviesada. Não há percentil quando não há respostas.
-- RPS é a média desde o início, incluindo inicialização e drenagem. Métricas parciais chegam a cada 500 ms ou 100 requisições. O registro detalhado tem uma entrada por tentativa e validação, com buffer máximo de 8 MB. Após a medição, um worker gera o XLSX; o tempo de geração não entra na duração ou no RPS. Se o disco não acompanhar, o teste falha explicitamente.
-- Keep-alive é aplicado com agentes HTTP/HTTPS explícitos, conforme a [API oficial do Newman](https://github.com/postmanlabs/newman#newmanrunoptions-object--callback-function).
-- CPU do processo (100% equivale a um núcleo), memória e atraso do event loop principal e dos workers ajudam a identificar sobrecarga do gerador. CPU, banco, filas e memória da API precisam ser monitorados no ambiente de destino. O número de usuários configurado sozinho não comprova capacidade da API. No modelo fechado, uma API mais lenta faz os usuários iniciarem menos operações; use o modelo de chegada para controlar a demanda.
-
-A interface fica em `127.0.0.1`; serve para uso local. Porta configurável com `PORT=3001 npm start`. Importação limitada a 5 MB. O projeto não inclui execução distribuída nem agendamento recorrente. O modelo de chegada controla cenários/s; equivale a RPS planejado quando o cenário tem uma requisição.
-
-## Validação
+## Verificação e calibração
 
 ```bash
-npm test
-```
-
-Os testes usam um servidor HTTP local e conferem carga sustentada, limite de threads, contagem exata, chamadas de scripts, falhas HTTP, assertions, timeouts, cancelamento, integridade do XLSX e cenários criados pela interface, incluindo login, extração de token e chamada autenticada.
-
-## API local e versões
-
-As rotas anteriores continuam disponíveis. `GET /api/runs` sem paginação mantém a resposta em array. Novas rotas:
-
-| Rota | Uso |
-| --- | --- |
-| `POST /api/validate` | Validar uma configuração sem tráfego; erros podem incluir `step` (índice a partir de zero) e `field`. |
-| `POST /api/runs/check` | Verificação funcional de uma execução com um usuário. |
-| `GET /api/runs?page=1&pageSize=20&q=nome&status=inconclusive` | Histórico paginado, filtros e totais do workspace. `pageSize` aceita 1–100. |
-| `GET /api/runs/:id` | Resultado individual. |
-| `GET /api/runs/:id/series` | Janelas registradas; históricos antigos podem retornar `available: false`. |
-| `GET /api/runs/compare?left=idA&right=idB` | Diferenças de configuração e métricas; variação relativa é indisponível quando a referência é zero. |
-| `POST /api/runs/:id/regenerate` | Refazer XLSX a partir de eventos preservados. |
-
-Definições e resultados novos incluem `schemaVersion: 3`; resultados incluem `methodologyVersion: "3.0"`. Definições 2.0 preservam os critérios globais; a interface oferece atualização explícita para 3.0. A avaliação expõe `verdict`, `provisional`, `criteria` e `reasons`. Parâmetros novos: `scriptTimeout`, `scenarioTimeout`, `drainTimeout` e `evidence: {minResponses, minLoadPercent}`. `singleRun: true` normaliza a configuração para uma verificação funcional com um usuário, uma thread e uma única execução.
-
-Em resultados finais com relatório, as métricas públicas vêm dos registros que alimentam o XLSX; `engineMetrics` preserva os contadores originais do motor para conferência. Divergências são identificadas na tela e na planilha. Dados recuperados de uma interrupção continuam parciais.
-
-Metadados e série temporal ficam em arquivos privados ao lado do XLSX. Após reiniciar, execuções interrompidas ficam parciais e exportações interrompidas permitem nova tentativa, quando os eventos estão disponíveis.
-
-## Testes da interface
-
-```bash
+pnpm test
 pnpm test:browser
+pnpm benchmark
 ```
 
-No macOS, os testes usam o Google Chrome instalado em `/Applications`. Para outro caminho, use `CHROME_PATH=/caminho/do/chrome pnpm test:browser`. Em outros sistemas, instale o Chromium do Playwright com `pnpm exec playwright install chromium`, ou informe `CHROME_PATH`. Os testes iniciam uma API de exemplo local e um workspace temporário separado do histórico real.
+No macOS, Playwright usa o Google Chrome instalado. Em outros ambientes, instale Chromium ou informe `CHROME_PATH`.
 
-A suíte cobre validação sem tráfego, foco de erros, duplicação/recolhimento, salvar/carregar, execução, repetição, comparação, cancelamento, download, recuperação de gráficos, tela móvel e zoom.
+O benchmark compara cinco repetições da ferramenta e do k6 direto com cinco VUs, respostas de 100 ms e duração de 10 s. A janela estável é calculada pelo servidor independente. Compara também detalhes ligados/desligados e consulta do painel; resultados em `.runs/benchmark-k6/results.json`. Diferenças acima de 5% de throughput ou do maior entre 10% e 10 ms de p95 são sinalizadas. A calibração vale para a máquina e cenário medidos; não define capacidade de uma API externa.
 
-## Dependências
-
-Os lockfiles preservam Newman 6.2.2; Playwright é dependência de desenvolvimento para validar a interface. Use `npm audit` para consultar a situação atual das dependências transitivas. Não foi aplicada troca forçada da versão principal do Newman. Importe collections e scripts de origem confiável.
-
-
-## Metodologia 3.0 e throughput ao vivo
-
-A aprovação exige p95, taxa de falhas e amostra suficiente globalmente **e em cada estágio com carga positiva**. Um estágio lento não pode ficar diluído nos anteriores. Critérios de p95 por endpoint são opcionais, por nome único, com amostra mínima própria; nomes ambíguos não aprovam. O aquecimento é opcional e excluído das métricas de performance avaliadas. Tentativas de aquecimento continuam no histórico e na planilha, e falhas de scripts/validações permanecem visíveis.
-
-O painel apresenta tentativas HTTP/s, sucessos HTTP/s e cenários concluídos/s. Sucesso HTTP significa ausência de falha HTTP/transporte; não garante aprovação das validações. A taxa recente usa a última janela completa de um segundo, após 500 ms para receber lotes dos workers. A média dos últimos cinco segundos é ponderada pelo tempo disponível. Antes da primeira janela completa aparece “Coletando”; testes encerrados sem janela completa mostram “Sem janela”. As médias globais incluem inicialização, aquecimento e drenagem. Janelas parciais são identificadas no gráfico e no XLSX.
-
-“Executar uma vez” mostra **Fluxo aprovado**, sem critérios de capacidade ou p95. A metodologia 2.0 é preservada ao carregar/repetir definições anteriores; novos modelos, rampas, aquecimento e critérios por endpoint exigem atualização explícita para 3.0.
-
-Atraso do event loop principal ou de workers acima de 100 ms em três observações consecutivas de carga torna a evidência inconclusiva. O limite pode ser configurado nas opções avançadas ou pelo parâmetro `generatorLagLimitMs`. CPU elevada, isoladamente, não reprova. Esse detector não garante ausência de interferência menor do gerador; consulte a calibração abaixo.
-
-### Perfis e taxa de chegada
-
-No editor, defina p95 e amostra mínima por requisição. No modo Postman, use “Critérios por endpoint”, com uma regra `Nome | p95 em ms | amostra mínima` por linha.
-
-Use os perfis editáveis de carga constante, stress progressivo, pico e longa duração. Para rampas, informe alvo inicial e final de cada estágio. O gráfico mostra a trajetória planejada.
-
-No modelo de chegada, o gerador planeja **inícios de cenários/s**, com limite de simultaneidade. Partidas atrasadas mais de 100 ms, inclusive na recepção pelo worker, são descartadas. O cumprimento compara inícios reais confirmados pelos workers com chegadas planejadas. Não há fila de compensação para recuperar demanda perdida em rajadas. Cancelamentos e interrupções mantêm resultados parciais.
-
-Exemplo de CLI:
-
-```bash
-node load-runner.js \
-  --collection=examples/local.postman_collection.json \
-  --loadModel=arrival --maxConcurrent=100 --warmupSec=5 \
-  --stages='[{"durationSec":30,"fromTarget":5,"target":20,"ramp":true},{"durationSec":60,"target":20}]' \
-  --minResponses=100 --minLoadPercent=90 --xlsx=relatorio.xlsx
-```
-
-O XLSX acrescenta duração dos cenários global/por estágio (percentis de cenário não usam o teto de 600.000 ms aplicado ao HTTP), throughput HTTP e cenários por janela, evidências de chegadas, diagnóstico do gerador e links internos. O resumo executivo usa throughput da carga como indicador principal. Regeneração a partir do arquivo comprimido não envia novas requisições à API.
-
-### Calibração independente e limites observados
-
-Execute `pnpm benchmark` contra a API local controlada. Para incluir JMeter, informe `JMETER_BIN=/caminho/bin/jmeter pnpm benchmark`. São cinco repetições sequenciais com cinco usuários, respostas com atraso de 100 ms, duração de 10 s e janela estável de 3–9 s. O servidor confere todas as contagens independentemente. A calibração também compara registro detalhado e consulta do painel sob carga. Artefatos ficam em `.runs/benchmark/`; nenhuma ferramenta é instalada automaticamente por esse comando.
-
-A execução de referência está em `benchmarks/reference.json`. Ela mede o comportamento desta máquina e deste cenário HTTP simples; não define capacidade de uma API externa nem promete equivalência ao JMeter. Diferenças superiores a 5% de throughput ou ao maior entre 10%/10 ms de p95 são registradas para investigação, sem alterar as métricas para fazê-las coincidir.
-
-O motor inicia uma execução Newman isolada para cada cenário. Esse custo reduz o throughput em modelo fechado, e a ocupação dos workers pode elevar o tempo observado de resposta. O benchmark registra a diferença entre duração do cenário e latência HTTP; essa diferença inclui inicialização, scripts e processamento, não somente tempo da API. Para avaliar demanda fixa, use taxa de chegada e confira cumprimento e atrasos do gerador. Monitore a API no ambiente de destino.
+Não há execução distribuída, testes browser/gRPC/WebSocket, paralelismo interno da jornada ou editor livre de scripts nesta versão. O fluxograma cobre jornadas HTTP estruturadas com condições e repetições limitadas.

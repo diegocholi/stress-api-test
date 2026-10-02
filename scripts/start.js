@@ -2,7 +2,7 @@ const {spawnSync} = require('node:child_process');
 
 function start() {
   try {
-    for(const dependency of ['newman','exceljs','yauzl','yazl'])require(dependency);
+    for(const dependency of ['exceljs','yauzl','yazl'])require(dependency);
   } catch (error) {
     if (error.code !== 'MODULE_NOT_FOUND') throw error;
     console.log('Instalando as dependências para iniciar o Stress Lab…');

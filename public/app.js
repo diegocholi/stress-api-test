@@ -3,9 +3,9 @@ const stages = $('stages'); let selected=sessionStorage.getItem('stress-selected
 let selectedJob,historyPage=1,historySignature='',lastLibraryRefresh=0,seriesKey,refreshSequence=0;
 const comparisonOptions=new Map();
 let workspaceBusy=false,submitPending=false,repeatPending=false;
-let mode = 'builder', editorSchema=3,seriesInterval,seriesPhases={};
+let mode = 'builder', editorSchema=4,seriesInterval,seriesPhases={};
 
-let loadedTemplate=null,templates=[],dirty=false,cachedCollection,cachedEnvironment,librarySignature='',editorBusy=false;
+let loadedTemplate=null,templates=[],dirty=false,librarySignature='',editorBusy=false;
 function icon(name) {
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('icon');svg.setAttribute('aria-hidden','true');
   const use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href',`#i-${name}`);svg.append(use);return svg;
@@ -49,111 +49,12 @@ $('load-model').onchange=updateModel;updateModel();
 $('load-preset').onchange=()=>{const profiles={constant:[[60,10]],stress:[[30,10,true,1],[60,30,true,10],[30,50,true,30]],spike:[[30,5],[10,50],[30,5]],soak:[[3600,10]]};const profile=profiles[$('load-preset').value];if(profile){stages.replaceChildren();profile.forEach(args=>addStage(...args));markDirty();}};
 $('add-stage').onclick=()=>{if(stages.children.length<50){addStage();markDirty();}};
 
-function setMode(next) {
-  mode=next;
-  for (const tab of ['builder','postman']) {
-    const active=tab===next;
-    $(tab+'-tab').setAttribute('aria-selected',String(active));
-    $(tab+'-tab').tabIndex=active ? 0 : -1;
-    $(tab+'-panel').hidden=!active;
-    $(tab+'-panel').disabled=!active;
-  }
-}
-for (const tab of ['builder','postman']) {
-  $(tab+'-tab').onclick=()=>{setMode(tab);markDirty();};
-  $(tab+'-tab').onkeydown=event=>{
-    if (['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
-      event.preventDefault(); const next=event.key==='Home'?'builder':event.key==='End'?'postman':mode==='builder'?'postman':'builder';
-      setMode(next);markDirty(); $(next+'-tab').focus();
-    }
-  };
-}
-function updateRequests() {
-  const rows=[...$('requests').children];
-  rows.forEach((row,index)=>{
-    row.querySelector('strong').textContent=String(index+1).padStart(2,'0');
-    row.querySelector('[data-action="up"]').disabled=index===0;
-    row.querySelector('[data-action="down"]').disabled=index===rows.length-1;
-    row.querySelector('[data-action="remove"]').disabled=rows.length===1;row.querySelector('[data-action="duplicate"]').disabled=rows.length>=50;
-    row.querySelector('.request-label').textContent=row.querySelector('[data-field="name"]').value || 'Requisição';
-    row.querySelector('.request-url').textContent=row.querySelector('[data-field="url"]').value || 'URL não definida';
-    const validationCount=['expectedStatus','contains','jsonPath','extractPath'].filter(field=>row.querySelector(`[data-field="${field}"]`).value).length;
-    row.querySelector('.request-checks').textContent=`${validationCount} validações`;
-  });
-  $('add-request').disabled=rows.length>=50;
-  $('request-count').textContent=`${rows.length} ${rows.length===1?'REQUISIÇÃO':'REQUISIÇÕES'}`;
-}
-function addRequest(step={}) {
-  if ($('requests').children.length>=50) return;
-  const row=document.createElement('details');row.className='request-card';row.open=true;
-  row.innerHTML=`<summary class="request-head"><div class="request-identity"><strong></strong><span class="request-label">Requisição</span><span class="method-badge">GET</span><span class="request-url"></span><span class="request-checks"></span></div><div class="request-controls"><button type="button" data-action="up" aria-label="Mover requisição para cima">↑</button><button type="button" data-action="down" aria-label="Mover requisição para baixo">↓</button><button type="button" data-action="duplicate" aria-label="Duplicar requisição">⧉</button><button type="button" data-action="remove" aria-label="Remover requisição">×</button></div></summary>
-    <div class="request-body"><label>Nome da requisição<input data-field="name" placeholder="Ex.: criar cliente" maxlength="120"></label>
-    <div class="endpoint"><label>Método<select data-field="method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label><label>URL<input data-field="url" placeholder="https://sua-api.com/endpoint" required></label></div>
-    <details><summary>Headers e corpo da requisição</summary>
-      <label>Headers<textarea data-field="headers" rows="3" placeholder="Authorization: Bearer {{TOKEN}}&#10;Accept: application/json"></textarea><small>Um por linha: Nome: valor.</small></label>
-      <label>Tipo de corpo<select data-field="bodyType"><option value="none">Sem corpo</option><option value="json">JSON</option><option value="text">Texto</option></select></label>
-      <label data-body-label hidden>Corpo<textarea data-field="body" rows="5" placeholder='{"email":"{{UNIQUE_EMAIL}}"}' disabled></textarea><small>Use variáveis para dados dinâmicos. JSON recebe Content-Type automaticamente.</small></label>
-    </details>
-    <details><summary>Validações e extração de variáveis</summary>
-      <div class="pair"><label>Status esperado<input data-field="expectedStatus" type="number" min="100" max="599" value="200" placeholder="Opcional"></label><label>Resposta contém<input data-field="contains" placeholder="Texto opcional"></label></div>
-      <div class="pair"><label>Campo JSON<input data-field="jsonPath" placeholder="data.id"></label><label>Valor esperado (JSON)<input data-field="jsonValue" placeholder='123 ou "texto" ou true'></label></div>
-      <small>O caminho usa pontos, como items.0.id. O valor precisa ser JSON válido.</small>
-      <div class="pair"><label>Extrair campo JSON<input data-field="extractPath" placeholder="data.token"></label><label>Salvar na variável<input data-field="extractVariable" placeholder="TOKEN"></label></div>
-      <small>Nas próximas requisições, use {{TOKEN}} para o valor extraído.</small>
-      <div class="pair"><label>p95 máximo deste endpoint (ms)<input data-field="p95Limit" type="number" min="1" max="600000" placeholder="Opcional"></label><label>Amostra mínima do endpoint<input data-field="endpointSamples" type="number" min="1" value="100"></label></div><small>Critério opcional. Use nomes únicos para os endpoints avaliados.</small>
-    </details></div>`;
-  row.dataset.method='GET';
-  row.querySelector('[data-field="method"]').onchange=event=>{row.dataset.method=event.target.value;row.querySelector('.method-badge').textContent=event.target.value;};
-  row.querySelector('[data-field="bodyType"]').onchange=event=>{
-    const visible=event.target.value!=='none';row.querySelector('[data-body-label]').hidden=!visible;row.querySelector('[data-field="body"]').disabled=!visible;
-  };
-  row.addEventListener('input',updateRequests);
-  row.querySelectorAll('[data-action]').forEach(button=>button.onclick=event=>{
-    event.preventDefault();event.stopPropagation();
-    const action=button.dataset.action;
-    if(action==='up'&&row.previousElementSibling)row.parentNode.insertBefore(row,row.previousElementSibling);
-    if(action==='down'&&row.nextElementSibling)row.parentNode.insertBefore(row.nextElementSibling,row);
-    if(action==='duplicate'){try{addRequest(readStep(row,[...$('requests').children].indexOf(row)));}catch(e){showError(e);}}
-    if(action==='remove'&&$('requests').children.length>1)row.remove();
-    updateRequests();markDirty();
-  });
-  const field=(name,value)=>{row.querySelector(`[data-field="${name}"]`).value=value ?? '';};
-  for(const name of ['name','url','body','contains','p95Limit','endpointSamples'])if(step[name]!==undefined)field(name,step[name]);
-  if(step.method)field('method',step.method);if(step.bodyType)field('bodyType',step.bodyType);
-  if(step.expectedStatus!==undefined)field('expectedStatus',step.expectedStatus);
-  if(step.headers)field('headers',step.headers.map(h=>`${h.key}: ${h.value}`).join('\n'));
-  if(step.jsonCheck){field('jsonPath',step.jsonCheck.path);field('jsonValue',JSON.stringify(step.jsonCheck.value));}
-  if(step.extract){field('extractPath',step.extract.path);field('extractVariable',step.extract.variable);}
-  row.querySelector('[data-field="method"]').dispatchEvent(new Event('change'));
-  row.querySelector('[data-field="bodyType"]').dispatchEvent(new Event('change'));
-  $('requests').append(row);updateRequests();
-}
-function pairs(value, separator, label) {
-  return value.split(/\r?\n/).filter(line=>line.trim()).map(line=>{
-    const at=line.indexOf(separator);
-    if(at<1)throw new Error(`${label}: use Nome${separator} valor, um por linha.`);
-    return {key:line.slice(0,at).trim(),value:line.slice(at+1).trim()};
-  });
-}
-function readStep(row,index) {
-  const value=field=>row.querySelector(`[data-field="${field}"]`).value;
-  const problem=(message,field)=>{throw Object.assign(new Error(`Requisição ${index+1}: ${message}`),{step:index,field});};
-  let headers;try{headers=pairs(value('headers'),':','Headers');}catch(e){problem(e.message,'headers');}
-  const step={name:value('name'),method:value('method'),url:value('url').trim(),headers,bodyType:value('bodyType'),body:value('body'),expectedStatus:value('expectedStatus'),contains:value('contains'),p95Limit:value('p95Limit'),endpointSamples:value('endpointSamples')};
-  if(value('jsonPath')||value('jsonValue')) {
-    if(!value('jsonPath')||!value('jsonValue'))problem('informe o campo e o valor JSON esperado.','jsonValue');
-    try {step.jsonCheck={path:value('jsonPath').trim(),value:JSON.parse(value('jsonValue'))};}
-    catch {problem('valor esperado precisa ser JSON válido.','jsonValue');}
-  }
-  if(value('extractPath')||value('extractVariable')) {
-    if(!value('extractPath')||!value('extractVariable'))problem('informe o campo e o nome da variável extraída.','extractVariable');
-    step.extract={path:value('extractPath').trim(),variable:value('extractVariable').trim()};
-  }
-  return step;
-}
-function readScenario() {
-  return {variables:pairs($('variables').value,'=','Variáveis'),steps:[...$('requests').children].map(readStep)};
-}
+function setMode(){mode='builder';}
+const flowEditor=new FlowEditor($('requests'),()=>{markDirty();updateRequests();});
+function updateRequests(){const flow=flowEditor.value();let count=0;flowEditor.walk(flow.steps,n=>{if(n.type==='request')count++;});$('request-count').textContent=count+' REQUISIÇÕES';}
+function addRequest(step){if(step&&Object.keys(step).length){const flow=flowEditor.value();flow.steps.push(step);flowEditor.load(flow);}else flowEditor.add('request');updateRequests();}
+function pairs(value, separator, label) {return value.split(/\r?\n/).filter(line=>line.trim()).map(line=>{const at=line.indexOf(separator);if(at<1)throw new Error(`${label}: use Nome${separator} valor, um por linha.`);return {key:line.slice(0,at).trim(),value:line.slice(at+1).trim()};});}
+function readScenario(){const flow=flowEditor.value();if(flow.dataset){flow.dataset.select=$('dataset-select').value;flow.dataset.exhaustion=$('dataset-exhaustion').value;}flow.variables=pairs($('variables').value,'=','Variáveis');const normalize=nodes=>{for(const n of nodes){if(n.invalidHeaders)throw Object.assign(new Error('Headers: use Nome: valor, um por linha'),{nodeId:n.id,field:'headers'});if(n.invalidJsonCheck||n.invalidCondition||n.checks?.some(c=>c.invalid))throw Object.assign(new Error('Valor esperado precisa ser JSON válido'),{nodeId:n.id,field:'jsonValue'});if(n.type==='request'){n.checks=[...(n.checks || []),...(n.expectedStatus!==undefined&&n.expectedStatus!==''?[{source:'status',operator:'equals',value:Number(n.expectedStatus)}]:[]),...(n.contains?[{source:'text',operator:'contains',value:n.contains}]:[]),...(n.jsonCheck?[{source:'json',operator:'equals',...n.jsonCheck}]:[])];n.extracts=[...(n.extracts || []),...(n.extract?[{source:'json',scope:'journey',...n.extract}]:[])];for(const field of ['timeout','retries','p95Limit','endpointSamples'])if(n[field]===''||n[field]===undefined)delete n[field];}for(const key of ['children','then','else'])if(n[key])normalize(n[key]);}};for(const key of ['steps','setup','perUser','teardown'])normalize(flow[key]);return flow;}
 function clearErrors() {
   document.querySelectorAll('.field-error').forEach(el=>el.remove());
   document.querySelectorAll('[aria-invalid=true]').forEach(el=>{el.removeAttribute('aria-invalid');el.removeAttribute('aria-describedby');});
@@ -161,8 +62,9 @@ function clearErrors() {
 function showError(error) {
   $('message').textContent=error.message;$('message').className='error';
   let input;
-  if(Number.isInteger(error.step))input=$('requests').children[error.step]?.querySelector(`[data-field="${error.field || 'url'}"]`);
-  if(!input && error.field)input=$('form').elements.namedItem(error.field);
+  if(error.nodeId){createPage(0);flowEditor.select(error.nodeId);input=document.querySelector(`[data-node-id="${error.nodeId}"] [data-field="${error.field}"]`);}
+  if(!input&&Number.isInteger(error.step))input=$('requests').children[error.step]?.querySelector(`[data-field="${error.field || 'url'}"]`);
+  if(!input && error.field){input=$('form').elements.namedItem(error.field);const section=input?.closest('[data-create-section]');if(section)createPage(Number(section.dataset.createSection));}
   if(input) {
     location.hash='#configure';
     let parent=input.parentElement;while(parent){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement;}
@@ -180,14 +82,13 @@ addRequest();setMode('builder');
 
 async function api(url, data) {
   const res = await fetch(url,data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  const result = await res.json(); if(!res.ok)throw Object.assign(new Error(result.error || 'Falha na requisição'),{step:result.step,field:result.field}); return result;
+  const result = await res.json(); if(!res.ok)throw Object.assign(new Error(result.error || 'Falha na requisição'),{step:result.step,field:result.field,nodeId:result.nodeId,issues:result.issues}); return result;
 }
 async function readFile(id, required=false) {
   const file=$(id).files[0]; if(!file){if(required)throw new Error('Selecione a collection');return undefined;}
   if(file.size>5*1024*1024)throw new Error('Arquivo excede 5 MB');
   try{return JSON.parse(await file.text());}catch{throw new Error(`${file.name}: JSON inválido`);}
 }
-$('collection').onchange=async()=>{try{const c=await readFile('collection');$('collection-name').textContent=c?.info?.name || cachedCollection?.info?.name || 'Selecione uma collection com requisições.';}catch(e){$('collection-name').textContent=e.message;}};
 $('form').addEventListener('invalid',event=>{
   event.preventDefault();if(document.querySelector('.field-error'))return;
   const row=event.target.closest('.request-card'),step=row?[...$('requests').children].indexOf(row):undefined;
@@ -204,22 +105,21 @@ $('form').onsubmit=async event=>{
   finally{submitPending=false;executionAvailability();}
 };
 
-function endpointRules(){return $('endpoint-rules').value.split(/\r?\n/).filter(line=>line.trim()).map(line=>{const parts=line.split('|'),minResponses=Number(parts.pop()),p95=Number(parts.pop()),name=parts.join('|').trim();if(!name || !Number.isInteger(p95)||p95<1 || !Number.isInteger(minResponses)||minResponses<1)throw Object.assign(new Error('Critério por endpoint: use Nome | p95 em ms | amostra mínima.'),{field:'endpointRules'});return {name,p95,minResponses};});}
+function unusedEndpointRules(){return $('endpoint-rules').value.split(/\r?\n/).filter(line=>line.trim()).map(line=>{const parts=line.split('|'),minResponses=Number(parts.pop()),p95=Number(parts.pop()),name=parts.join('|').trim();if(!name || !Number.isInteger(p95)||p95<1 || !Number.isInteger(minResponses)||minResponses<1)throw Object.assign(new Error('Critério por endpoint: use Nome | p95 em ms | amostra mínima.'),{field:'endpointRules'});return {name,p95,minResponses};});}
 async function collectInput(includeSchedule=false) {
   const form=$('form').elements;
-  const source=mode==='builder'?{scenario:readScenario()}:{collection:$('collection').files.length?await readFile('collection',true):cachedCollection,environment:$('environment').files.length?await readFile('environment'):cachedEnvironment};
-  if(mode==='postman' && !source.collection)throw new Error('Selecione uma collection');
-  const input={schemaVersion:editorSchema,name:form.name.value,mode,...source,
+  const source={scenario:readScenario()};
+  const input={schemaVersion:4,engine:'k6',journeyThresholds:$('journey-p95').value?{p95:Number($('journey-p95').value)}:null,name:form.name.value,mode,...source,
     stages:[...stages.children].map(row=>({durationSec:Number(row.children[0].value),target:Number(row.children[1].value),...(row.querySelector('[data-stage-profile]').value==='ramp'?{ramp:true,fromTarget:Number(row.querySelector('[data-stage-from]').value)}:{})})),
-    loadModel:form.loadModel.value,warmupSec:Number(form.warmupSec.value),maxConcurrent:Number(form.maxConcurrent.value),generatorLagLimitMs:Number(form.generatorLagLimitMs.value),endpointThresholds:mode==='postman'?endpointRules():[...$('requests').children].flatMap((row,i)=>{const p=row.querySelector('[data-field=p95Limit]').value;return mode==='builder' && p?[{name:row.querySelector('[data-field=name]').value || `Requisição ${i+1}`,p95:Number(p),minResponses:Number(row.querySelector('[data-field=endpointSamples]').value)}]:[]}),
-    maxWorkers:Number(form.maxWorkers.value),timeout:Number(form.timeout.value),scriptTimeout:Number(form.scriptTimeout.value),scenarioTimeout:Number(form.scenarioTimeout.value),drainTimeout:Number(form.drainTimeout.value),evidence:{minResponses:Number(form.minResponses.value),minLoadPercent:Number(form.minLoadPercent.value)},thinkTime:Number(form.thinkTime.value),
+    loadModel:form.loadModel.value,warmupSec:Number(form.warmupSec.value),maxConcurrent:Number(form.maxConcurrent.value),generatorLagLimitMs:Number(form.generatorLagLimitMs.value),endpointThresholds:(()=>{const rules=[];flowEditor.walk(readScenario().steps,n=>{if(n.type==='request'&&n.p95Limit)rules.push({nodeId:n.id,name:n.name,p95:Number(n.p95Limit),minResponses:Number(n.endpointSamples || 100)});});return rules;})(),
+    timeout:Number(form.timeout.value),scenarioTimeout:Number(form.scenarioTimeout.value),drainTimeout:Number(form.drainTimeout.value),evidence:{minResponses:Number(form.minResponses.value),minLoadPercent:Number(form.minLoadPercent.value)},thinkTime:Number(form.thinkTime.value),
     keepAlive:form.keepAlive.checked,bail:form.bail.checked,insecure:form.insecure.checked,
     thresholds:{p95:Number(form.p95.value),errorRate:Number(form.errorRate.value)}};
   if(includeSchedule && $('execution-time').value==='schedule' && form.scheduledAt.value)input.scheduledAt=new Date(form.scheduledAt.value).toISOString();
   return input;
 }
 function editorState() {
-  $('methodology-note').textContent=editorSchema>=3?'Metodologia 3.0: avaliação global e por estágio.':'Metodologia 2.0 preservada: avaliação global. Atualize explicitamente para aplicar os critérios por estágio.';
+  $('methodology-note').textContent='k6 · Metodologia 4.0 · Avaliação por estágio, passo e jornada.';
   $('upgrade-methodology').hidden=editorSchema>=3;
   $('editor-status').textContent=dirty?'NÃO SALVO':loadedTemplate?'SALVO':'NOVO';
   $('editor-status').className=`badge ${dirty?'scheduled':loadedTemplate?'completed':'neutral'}`;
@@ -236,37 +136,29 @@ function setEditorBusy(value) {
 }
 function canReplace() {if(editorBusy){libraryMessage('Aguarde a operação atual terminar.');return false;}return !dirty || window.confirm('Há alterações não salvas. Deseja substituí-las?');}
 function resetEditor() {
-  $('form').reset();scheduleMode();clearErrors();loadedTemplate=null;cachedCollection=cachedEnvironment=undefined;
-  $('collection').required=true;$('collection-name').textContent='Selecione uma collection com requisições.';
-  $('environment-name').textContent='';$('clear-environment').hidden=true;
-  $('requests').replaceChildren();addRequest();stages.replaceChildren();addStage();addStage(60,20);setMode('builder');
-  editorSchema=3;dirty=false;editorState();$('message').textContent='';renderLibrary();updateModel();
+  $('form').reset();scheduleMode();clearErrors();loadedTemplate=null;
+
+  flowEditor.load();addRequest();if($('form').dataset.createPage!==undefined)createPage(0);stages.replaceChildren();addStage();addStage(60,20);setMode('builder');
+  editorSchema=4;dirty=false;editorState();$('message').textContent='';renderLibrary();updateModel();
 }
 function newTest() {if(!canReplace())return;resetEditor();location.hash='#configure';$('form').elements.name.focus();}
-$('upgrade-methodology').onclick=()=>{editorSchema=3;markDirty();};
+$('upgrade-methodology').onclick=()=>{editorSchema=4;markDirty();};
 $('new-test').onclick=newTest;$('detach-template').onclick=newTest;
-$('clear-environment').onclick=()=>{cachedEnvironment=undefined;$('environment').value='';$('environment-name').textContent='';$('clear-environment').hidden=true;markDirty();};
 async function loadTemplate(id) {
   if(!canReplace())return false;
   setEditorBusy(true);
   try {
-    const item=await api(`/api/templates/${id}`),d=item.definition;
+    const item=await api(`/api/templates/${id}`);if(item.migration?.compatible===false)throw new Error(item.migration.issues.map(i=>i.message).join('; '));const d=item.definition;
     resetEditor();const form=$('form').elements;
     editorSchema=d.schemaVersion || 2;
-    for(const name of ['name','maxWorkers','timeout','scriptTimeout','scenarioTimeout','drainTimeout','thinkTime'])form[name].value=d[name];
+    for(const name of ['name','timeout','scenarioTimeout','drainTimeout','thinkTime'])form[name].value=d[name];
     for(const name of ['keepAlive','bail','insecure'])form[name].checked=d[name];
     form.p95.value=d.thresholds.p95;form.errorRate.value=d.thresholds.errorRate;form.minResponses.value=d.evidence?.minResponses ?? 1;form.minLoadPercent.value=d.evidence?.minLoadPercent ?? 0;
     stages.replaceChildren();d.stages.forEach(stage=>addStage(stage.durationSec,stage.target,stage.ramp,stage.fromTarget));
     form.generatorLagLimitMs.value=d.generatorLagLimitMs ?? 100;form.loadModel.value=d.loadModel || 'users';form.warmupSec.value=d.warmupSec || 0;form.maxConcurrent.value=d.maxConcurrent || 500;updateModel();
     if(d.mode==='builder') {
-      $('requests').replaceChildren();d.scenario.steps.forEach(step=>addRequest(step));
-      [...$('requests').children].forEach((row,i)=>{const rule=d.endpointThresholds?.find(r=>r.name===(d.scenario.steps[i].name || `Requisição ${i+1}`));if(rule){row.querySelector('[data-field=p95Limit]').value=rule.p95;row.querySelector('[data-field=endpointSamples]').value=rule.minResponses;}});
+      flowEditor.load(d.scenario);$('dataset-select').value=d.scenario.dataset?.select || 'iteration';$('dataset-exhaustion').value=d.scenario.dataset?.exhaustion || 'error';$('dataset-note').textContent=d.scenario.dataset?d.scenario.dataset.rows.length+' linhas carregadas.':'';$('journey-p95').value=d.journeyThresholds?.p95 || '';
       $('variables').value=(d.scenario.variables || []).map(v=>`${v.key}=${v.value}`).join('\n');
-    } else {
-      cachedCollection=d.collection;cachedEnvironment=d.environment;$('endpoint-rules').value=(d.endpointThresholds || []).map(r=>`${r.name} | ${r.p95} | ${r.minResponses}`).join('\n');
-      $('collection').required=false;$('collection-name').textContent=`Carregada: ${d.collection.info.name || d.name}. Selecione um arquivo para substituir.`;
-      $('environment-name').textContent=d.environment?`Carregado: ${d.environment.name || 'Environment salvo'}`:'';
-      $('clear-environment').hidden=!d.environment;
     }
     setMode(d.mode);loadedTemplate={id:item.id,name:d.name,revision:item.revision};dirty=false;editorState();renderLibrary();
     $('message').textContent='Teste carregado. Você pode editar, executar ou agendar.';
@@ -310,13 +202,13 @@ function renderLibrary() {
   $('saved-list').replaceChildren(...filtered.map(item=>{
     const card=document.createElement('div');card.className='saved-item';card.dataset.selected=String(item.id===loadedTemplate?.id);
     const title=document.createElement('div');title.className='saved-title';const name=document.createElement('strong');name.textContent=item.name;
-    const badge=document.createElement('span');badge.className='badge neutral';badge.textContent=item.mode==='builder'?'INTERFACE':'POSTMAN';title.append(name,badge);
+    const badge=document.createElement('span');badge.className='badge neutral';badge.textContent=item.canRun===false?'ADAPTAÇÃO NECESSÁRIA':'K6';title.append(name,badge);
     const meta=document.createElement('span');meta.className='saved-meta';meta.textContent=`${item.steps} requisições · ${item.durationSec}s · até ${item.peakUsers} ${item.loadModel==='arrival'?'cenários/s':'usuários'} · atualizado em ${new Date(item.updatedAt).toLocaleString('pt-BR')}`;
     const actions=document.createElement('div');actions.className='saved-actions';
     for(const [label,cls,action]of [['Carregar','load-template',()=>loadTemplate(item.id)],['Duplicar','duplicate-template',()=>duplicateTemplate(item.id)],['Excluir','delete-template',()=>deleteTemplate(item)]]){
       const button=document.createElement('button');button.type='button';button.className=cls;button.textContent=label;button.disabled=editorBusy;button.setAttribute('aria-label',`${label} ${item.name}`);button.onclick=action;actions.append(button);
     }
-    card.append(title,meta,actions);return card;
+    if(item.migration?.issues?.length){const note=document.createElement('p');note.className='help error';note.textContent=item.migration.issues.map(i=>i.message).join('; ');card.append(note);}card.append(title,meta,actions);return card;
   }));
   if(!filtered.length){const empty=document.createElement('div');empty.className='empty-history';const title=document.createElement('strong');title.textContent=search?'Nenhum teste encontrado.':'Salve seu primeiro cenário.';const help=document.createElement('p');help.textContent=search?'Tente buscar por outro nome.':'Configure um teste e clique em Salvar teste para reutilizá-lo depois.';empty.append(icon('save'),title,help);$('saved-list').append(empty);}
 }
@@ -334,7 +226,7 @@ function renderMetrics(s={}) {
   $('throughput-status').textContent=`${stale?'Dados desatualizados · ':''}${s.throughput?(running?'Janela completa de 1s, aguardando lotes dos workers.':'Última janela completa de 1s; medição encerrada.'):'Throughput recente não registrado nesta versão.'} ${s.updatedAt?`Atualizado às ${new Date(s.updatedAt).toLocaleTimeString('pt-BR')}.`:''}`;
   const current=s.stages?.find(stage=>stage.stage===s.stage),coverage=current?.loadPercent;
   $('generator-status').textContent=`${s.generatorHealth?.overloaded?'Gerador sobrecarregado · ':''}${['completed','failed','cancelled'].includes(s.status)?'Encerrado':({warmup:'Aquecimento',load:'Carga',drain:'Drenagem'})[s.phase] || 'Execução'} · ${number(s.busy || 0,0)} cenários em execução · ${number(s.paused || 0,0)} usuários em pausa · ${number(s.inFlight || 0,0)} requisições em andamento · cumprimento ${number(coverage)}%${current?.droppedArrivals?` · ${current.droppedArrivals} chegadas descartadas`:''}`;
-  $('generator-telemetry').textContent=`Gerador: CPU ${number(s.cpuPercent)}% (100% = 1 núcleo) · memória ${number(s.rssMB)} MB · event loop ${number(s.eventLoopLagMs)} ms · workers ${number(s.workerEventLoopLagMs)} ms. Carga insuficiente torna a avaliação inconclusiva; CPU isolada não reprova a API.`;
+  $('generator-telemetry').textContent=`Coletor Node: CPU ${number(s.cpuPercent)}% (100% = 1 núcleo) · memória ${number(s.rssMB)} MB · event loop ${number(s.eventLoopLagMs)} ms · k6 CPU ${number(s.k6CpuPercent)}% · k6 memória ${number(s.k6RssMB)} MB. Carga insuficiente torna a avaliação inconclusiva; CPU isolada não reprova a API.`;
   $('load-progress').value=coverage || 0;
 }
 renderMetrics();
@@ -389,6 +281,7 @@ function selectRun(id) {
   selected=id;sessionStorage.setItem('stress-selected',id);selectedJob=undefined;seriesKey=undefined;points=[];seriesPhases={};seriesInterval=undefined;
   $('comparison-note').textContent='';$('comparison-output').replaceChildren();
   renderCharts([]);historySignature='';
+  resultTab='summary';resultStage='';resultTabs();
 }
 function number(value,precision=2) {return Number.isFinite(value)?value.toLocaleString('pt-BR',{maximumFractionDigits:precision}):value===true?'Sim':value===false?'Não':value ?? '—';}
 function tableBody(id,rows) {
@@ -435,6 +328,7 @@ function render(job) {
   tableBody('endpoints-table',s.reportInfo?.endpoints?.map(e=>[e.name,e.method,e.requests,e.failed,e.p95]) || [['Disponível após gerar o relatório','—','—','—','—']]);
   const f=s.reportInfo?.failureCounts || {http:Object.entries(s.codes || {}).reduce((n,[code,count])=>n+(Number(code)>=400?count:0),0),transport:s.transportErrors || 0,validation:s.assertionFailures || 0,script:s.scriptFailures || 0,run:s.runFailures || 0};
   $('failure-summary').textContent=`HTTP: ${f.http} · Transporte: ${f.transport} · Validações: ${f.validation} · Scripts: ${f.script} · Execuções: ${f.run}. A taxa HTTP não soma falhas de validação.`;
+  if(resultTab==='flow'&&!$('flow-results').contains(document.activeElement))renderSteps(job);
   $('executive-summary').textContent=`${number(s.requests,0)} tentativas · throughput da carga ${number(s.loadRps)} req/s · ${number(s.scenarios?.p95)} ms de p95 por cenário · ${s.evaluation?.reasons.length || 0} motivos de atenção. Aprovação vale para o cenário, os limites e o ambiente desta execução.`;
   comparisonOptions.set(job.id,job.name);renderComparisonOptions();
 }
@@ -558,3 +452,35 @@ $('history-prev').onclick=()=>{historyPage=Math.max(1,historyPage-1);refresh().c
 $('history-next').onclick=()=>{historyPage++;refresh().catch(showError);};
 async function poll(){try{await refresh();$('connection').classList.remove('offline');$('connection-label').textContent='Servidor conectado';}catch(e){$('connection').classList.add('offline');$('connection-label').textContent='Servidor desconectado';if(selectedJob?.result)renderMetrics(selectedJob.result);}finally{setTimeout(poll,1000);}}
 poll();
+
+function parseCSV(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){row.push(cell);cell='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(v=>v!==''))rows.push(row);row=[];cell='';}else cell+=c;}if(quoted)throw new Error('CSV com aspas não encerradas');if(cell||row.length){row.push(cell);rows.push(row);}const headers=rows.shift()?.map(v=>v.trim().replace(/^\uFEFF/,''));if(!headers?.length||new Set(headers).size!==headers.length)throw new Error('CSV exige cabeçalhos únicos');return rows.map(values=>{if(values.length!==headers.length)throw new Error('CSV com quantidade de colunas inconsistente');return Object.fromEntries(headers.map((key,i)=>[key.trim(),values[i]]));});}
+$('dataset-file').onchange=async()=>{try{const file=$('dataset-file').files[0];if(!file)return;if(file.size>5*1024*1024)throw new Error('Dados excedem 5 MB');const text=await file.text(),rows=file.name.endsWith('.csv')?parseCSV(text):JSON.parse(text);if(!Array.isArray(rows)||!rows.length)throw new Error('Informe um array JSON ou CSV com linhas');flowEditor.checkpoint();flowEditor.flow.dataset={rows,select:$('dataset-select').value,exhaustion:$('dataset-exhaustion').value};$('dataset-note').textContent=rows.length+' linhas. Use {{NOME_DA_COLUNA}} nos blocos.';flowEditor.changed();}catch(error){$('dataset-note').textContent=error.message;}};
+$('dataset-clear').onclick=()=>{flowEditor.checkpoint();delete flowEditor.flow.dataset;$('dataset-file').value='';$('dataset-note').textContent='Dados removidos';flowEditor.changed();};
+document.querySelectorAll('.form-section').forEach((section,index)=>section.dataset.createSection=String(index+1));
+function createPage(index){$('form').dataset.createPage=String(index);for(const button of document.querySelectorAll('[data-create-step]'))button.setAttribute('aria-current',Number(button.dataset.createStep)===index?'step':'false');$('creation-review').hidden=index!==3;}
+createPage(0);
+for(const button of document.querySelectorAll('[data-create-step]'))button.onclick=async()=>{
+  const index=Number(button.dataset.createStep);if(index===3){try{const input=await collectInput();await api('/api/validate',input);const target=$('creation-review');target.replaceChildren();const title=document.createElement('h3');title.textContent='Revisão do cenário';let requests=0;flowEditor.walk(input.scenario.steps,n=>{if(n.type==='request')requests++;});const details=document.createElement('p');details.textContent=`${requests} blocos HTTP · ${input.scenario.setup.length} de preparação global · ${input.scenario.perUser.length} de preparação por usuário · ${input.scenario.teardown.length} de limpeza.`;const load=document.createElement('p');load.textContent=`${input.stages.reduce((sum,s)=>sum+s.durationSec,0)} segundos de carga · ${input.loadModel==='arrival'?'Taxa de chegada (jornadas/s)':'Usuários concorrentes'} · p95 HTTP ${input.thresholds.p95} ms · falhas máximas ${input.thresholds.errorRate}% · amostra ${input.evidence.minResponses} por estágio.`;const note=document.createElement('p');note.textContent='Configuração validada sem tráfego. Confira a jornada com Executar uma vez antes de aplicar carga.';target.append(title,details,load,note);}catch(error){showError(error);return;}}createPage(index);
+};
+let resultTab='summary';
+function resultTabs(){const flow=resultTab==='flow',failures=resultTab==='failures',generator=resultTab==='generator';$('flow-results').hidden=!flow;$('event-results').hidden=!failures;for(const el of document.querySelectorAll('#results-panel .result-section'))el.hidden=flow||failures||generator&&el.querySelector('#criteria-table');$('executive-summary').hidden=flow||failures;for(const b of document.querySelectorAll('[data-result-tab]'))b.setAttribute('aria-pressed',String(b.dataset.resultTab===resultTab));}
+let resultStage='';
+function renderSteps(job){
+  const root=$('flow-results');root.replaceChildren();const title=document.createElement('h3');title.textContent='Jornada e passos percorridos';root.append(title);
+  const filter=document.createElement('select');filter.setAttribute('aria-label','Estágio dos passos');for(const stage of [{stage:'',label:'Todos os estágios'},...(job.result?.stages || []).map(s=>({stage:s.stage,label:'Estágio '+s.stage}))]){const option=document.createElement('option');option.value=stage.stage;option.textContent=stage.label;filter.append(option);}filter.value=resultStage;filter.onchange=()=>{resultStage=filter.value;renderSteps(job);};root.append(filter);
+  const stats=resultStage?job.result?.stepStages || []:job.result?.steps || [],steps=new Map(stats.filter(s=>!resultStage||s.stage===Number(resultStage)).map(s=>[s.nodeId,s]));
+  const graph=document.createElement('div');graph.className='result-flow-graph';const blocks=new Map();
+  for(const node of job.result?.flow || []){const step=steps.get(node.id),row=document.createElement('div');row.className='step-outcome'+(step?.failed?' failed':!step?.recordedExecutions&&!step?.requests?' skipped':'');row.dataset.nodeId=node.id;const name=document.createElement('strong');name.textContent=`${({request:'HTTP',condition:'SE',loop:'LOOP',pause:'PAUSA',group:'GRUPO'})[node.type] || node.type} · ${node.name}`;
+    const info=document.createElement('p');info.textContent=step?`${step.recordedExecutions ?? step.requests} execuções · ${step.requests} avaliadas · ${step.failed} falhas funcionais · ${step.skipped} ignorados · p95 ${number(step.p95)} ms`:'Sem execução registrada para este passo.';
+    const context=document.createElement('small');context.textContent=`${node.phase==='steps'?'Jornada':node.phase==='perUser'?'Preparação por usuário':node.phase==='setup'?'Preparação global':'Limpeza global'}${node.branch==='then'?' · se verdadeiro':node.branch==='else'?' · se falso':''}${node.dependsOn?.length?' · usa '+node.dependsOn.join(', '):''}`;
+    const view=document.createElement('button');view.type='button';view.textContent='Ver eventos deste passo';view.onclick=()=>loadEvents(job.id,node.id);row.append(name,context,info,view);blocks.set(node.id,row);(blocks.get(node.parent) || graph).append(row);
+  }
+  if(!blocks.size){const p=document.createElement('p');p.textContent='Esta execução não possui registros de fluxo.';graph.append(p);}root.append(graph);
+  if(job.result?.scenarios){const p=document.createElement('p');p.textContent=`Jornadas concluídas: ${job.result.runs || 0} · reprovadas: ${job.result.failedRuns || 0} · p95 ${number(job.result.scenarios.p95)} ms`;root.prepend(p);}
+}
+let eventsRequest=0;
+async function loadEvents(id,nodeId,page=1){const request=++eventsRequest;const root=$('event-results');root.replaceChildren();try{const data=await api(`/api/runs/${id}/events?page=${page}&pageSize=50${nodeId?'&nodeId='+encodeURIComponent(nodeId):'&category=failures'}`);if(request!==eventsRequest||selectedJob?.id!==id)return;const heading=document.createElement('h3');heading.textContent=nodeId?'Eventos do passo':'Falhas e eventos da jornada';root.append(heading);const items=data.items;for(const event of items){const p=document.createElement('p');p.className='step-outcome';p.textContent=`${event.type} · ${event.name || event.runId || ''} · ${event.message || event.reason || (event.variable?event.variable+' = '+event.value:'')} · ${new Date(event.ts).toLocaleTimeString('pt-BR')}`;root.append(p);}const prev=document.createElement('button'),next=document.createElement('button');prev.type=next.type='button';prev.textContent='Anterior';next.textContent='Próxima';prev.disabled=page===1;next.disabled=page*50>=data.total;prev.onclick=()=>loadEvents(id,nodeId,page-1);next.onclick=()=>loadEvents(id,nodeId,page+1);root.append(prev,next);if(!data.available){const p=document.createElement('p');p.textContent='Eventos indisponíveis ou retenção expirada. Consulte o XLSX.';root.append(p);}resultTab='failures';resultTabs();}catch(error){root.textContent=error.message;}}
+for(const button of document.querySelectorAll('[data-result-tab]'))button.onclick=()=>{resultTab=button.dataset.resultTab;resultTabs();if(selectedJob){if(resultTab==='flow')renderSteps(selectedJob);if(resultTab==='failures')loadEvents(selectedJob.id);}};
+api('/api/engine').then(engine=>{$('methodology-note').textContent=engine.available?`${engine.version} · Metodologia 4.0`:engine.message;}).catch(()=>{});
+
+const comparisonDownload=document.createElement('a');comparisonDownload.textContent='Baixar comparação XLSX';comparisonDownload.id='comparison-xlsx';comparisonDownload.hidden=true;document.querySelector('.comparison-controls').append(comparisonDownload);$('compare-baseline').addEventListener('change',()=>{comparisonDownload.hidden=true;});$('compare-runs').addEventListener('click',()=>{if(selected&&$('compare-baseline').value){comparisonDownload.href='/api/runs/compare/xlsx?left='+encodeURIComponent($('compare-baseline').value)+'&right='+encodeURIComponent(selected);comparisonDownload.hidden=false;}});

@@ -7,8 +7,8 @@ const run=promisify(execFile);
 test('CLI returns zero only for a completed approved measurement with a generated XLSX',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'stress-cli-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const server=http.createServer((_req,res)=>res.end('ok'));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const collection=path.join(dir,'collection.json');fs.writeFileSync(collection,JSON.stringify({info:{name:'CLI'},item:[{name:'GET',request:{method:'GET',url:`http://127.0.0.1:${server.address().port}`}}]}));
-  const args=[path.join(__dirname,'../load-runner.js'),`--collection=${collection}`,'--stages=1:1','--maxWorkers=1','--minLoadPercent=0'];
+  const collection=path.join(dir,'collection.json');fs.writeFileSync(collection,JSON.stringify({name:'CLI',scenario:{steps:[{name:'GET',method:'GET',url:`http://127.0.0.1:${server.address().port}`}]},stages:'1:1'}));
+  const args=[path.join(__dirname,'../load-runner.js'),`--scenario=${collection}`,'--stages=1:1','--minLoadPercent=0'];
   const approved=await run(process.execPath,[...args,'--minResponses=1',`--xlsx=${path.join(dir,'approved.xlsx')}`]);
   const snapshots=approved.stdout.split('\n').filter(line=>line.startsWith('{')).map(line=>JSON.parse(line));assert.equal(snapshots[0].passed,false);assert.equal(snapshots.at(-1).passed,true);assert.equal(snapshots.at(-1).evaluation.verdict,'approved');assert.ok(fs.existsSync(path.join(dir,'approved.xlsx')));
   let failed;try{await run(process.execPath,[...args,'--minResponses=100000000',`--xlsx=${path.join(dir,'inconclusive.xlsx')}`]);}catch(err){failed=err;}

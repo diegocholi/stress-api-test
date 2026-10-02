@@ -91,17 +91,17 @@ test('arrival saturation records missed demand without compensating bursts and e
   const checked=await buildReport({output:path.join(dir,'corrupted.xlsx'),events:corrupted,metadata:runner.metadata()});
   assert.equal(checked.rows,result.requests);assert.equal(checked.integrity,false);assert.equal(checked.evaluation.verdict,'partial');
 });
-test('warmup does not change measured-stage samples and legacy definitions retain methodology 2.0',async t=>{
+test('warmup does not change measured-stage samples and reruns migrate legacy definitions to methodology 4.0',async t=>{
   const oracle=await target(t,10);
   const result=await new Runner({collection:oracle.collection,warmupSec:1,stages:'1:1',maxWorkers:1,evidence:{minResponses:1,minLoadPercent:0}}).start();
   assert.equal(result.requests,oracle.count);assert.ok(result.requests>result.performance.requests);assert.ok(result.performance.requests>=result.stages[0].requests);assert.ok(result.stages[0].requests>0);
   const legacy=await new Runner({schemaVersion:2,collection:oracle.collection,stages:'1:1',maxWorkers:1,evidence:{minResponses:1,minLoadPercent:0}}).start();
-  assert.equal(legacy.methodologyVersion,'2.0');assert.ok(!legacy.evaluation.criteria.some(c=>c.id==='stage-1-p95'));
+  assert.equal(legacy.methodologyVersion,'4.0');assert.ok(legacy.evaluation.criteria.some(c=>c.id==='stage-1-p95'));
 });
 test('ramped arrivals count confirmed starts and report identical metrics after regeneration',async t=>{
   const oracle=await target(t,20),dir=fs.mkdtempSync(path.join(os.tmpdir(),'stress-arrival-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const output=path.join(dir,'arrival.xlsx'),runner=new Runner({collection:oracle.collection,loadModel:'arrival',maxWorkers:1,warmupSec:1,stages:[{durationSec:3,fromTarget:5,target:10,ramp:true}],evidence:{minResponses:1,minLoadPercent:90}},output);
-  const result=await runner.start();assert.equal(result.requests,oracle.count);assert.equal(result.stages[0].plannedArrivals,22);assert.equal(result.stages[0].startedArrivals+result.stages[0].droppedArrivals,22);
+  const result=await runner.start();assert.equal(result.requests,oracle.count);assert.equal(result.stages[0].plannedArrivals,23);assert.equal(result.stages[0].startedArrivals+result.stages[0].droppedArrivals,23);
   assert.equal(result.reportInfo.integrity,true);assert.ok(result.stages[0].startedArrivals>0);
   const info=await buildReport({output:path.join(dir,'copy.xlsx'),events:output+'.events.ndjson.gz',metadata:runner.metadata()});
   assert.deepEqual(info.metrics.stages,result.stages);assert.deepEqual(info.metrics.performance,result.performance);assert.equal(info.evaluation.verdict,result.evaluation.verdict);

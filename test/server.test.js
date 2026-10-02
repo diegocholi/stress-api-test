@@ -25,10 +25,10 @@ test('web API imports, schedules persist, cancels, executes and downloads final 
     return {response,data:await response.json()};
   };
   const collection=JSON.parse(fs.readFileSync(path.join(__dirname,'../examples/local.postman_collection.json')));
-  const input={collection,stages:'1:1',maxWorkers:1};
+  const input={collection,environment:JSON.parse(fs.readFileSync(path.join(__dirname,'../examples/local.postman_environment.json'))),stages:'1:1',maxWorkers:1};
   assert.equal((await fetch(app.base)).status,200);
   const script=await (await fetch(app.base+'/app.js')).text();assert.ok(script.includes('scheduledAt'));
-  assert.equal((await call('/api/runs',{...input,collection:{}})).response.status,400);
+  assert.equal((await call('/api/runs',{...input,collection:{}})).response.status,422);
   const scheduled=await call('/api/runs',{...input,scheduledAt:new Date(Date.now()+60000).toISOString()});assert.equal(scheduled.response.status,201);
   await stop(app.child);app=await boot(dir);
   let jobs=(await call('/api/runs')).data;assert.equal(jobs[0].status,'scheduled');
@@ -69,6 +69,7 @@ test('web API imports, schedules persist, cancels, executes and downloads final 
     jobs=(await call('/api/runs')).data;if(jobs.find(j=>j.id===repeat.data.id)?.result?.reportStatus==='ready')break;await pause(100);
   }
   const repeated=jobs.find(j=>j.id===repeat.data.id);assert.equal(repeated.status,'completed');assert.ok(repeated.result.requests>0);assert.equal(repeated.canRepeat,true);
+  const compared=await fetch(`${app.base}/api/runs/compare/xlsx?left=${immediate.id}&right=${repeated.id}`);assert.equal(compared.status,200);const comparisonBook=new Excel.Workbook();await comparisonBook.xlsx.load(Buffer.from(await compared.arrayBuffer()));assert.ok(comparisonBook.getWorksheet('Comparação'));assert.equal(comparisonBook.getWorksheet('Resumo').getCell('B3').value,immediate.id);assert.equal(comparisonBook.getWorksheet('Resumo').getCell('B5').value,repeated.id);
   assert.equal(jobs.find(j=>j.id===immediate.id).result.requests,result.result.requests,'original results are retained');
   assert.ok(fs.existsSync(path.join(dir,`${immediate.id}.xlsx`)));assert.ok(fs.existsSync(path.join(dir,`${repeated.id}.xlsx`)));
   assert.equal(fs.statSync(path.join(dir,'inputs',`${immediate.id}.json`)).mode&0o777,0o600);

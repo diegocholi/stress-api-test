@@ -5,16 +5,16 @@ test.beforeAll(async()=>{target=http.createServer((req,res)=>{received++;res.set
 test.afterAll(async()=>{target.closeAllConnections();await new Promise(resolve=>target.close(resolve));});
 async function configure(page,name='Health navegador') {
   await page.goto('/#configure');await page.locator('[name=name]').fill(name);await page.locator('[data-field=url]').fill(url);
-  await page.locator('#stages input').nth(0).fill('1');await page.locator('#stages input').nth(1).fill('1');
+  await page.getByRole('button',{name:'2 · Carga',exact:true}).click();await page.locator('#stages input').nth(0).fill('1');await page.locator('#stages input').nth(1).fill('1');
   await page.getByRole('button',{name:'Remover estágio'}).last().click();
-  await page.getByText('Threads e timeouts avançados',{exact:true}).click();await page.locator('[name=maxWorkers]').fill('1');await page.locator('[name=minResponses]').fill('1');await page.locator('[name=minLoadPercent]').fill('0');await expect(page.locator('#submit')).toBeEnabled({timeout:20000});
+  await page.getByText('Timeouts e diagnóstico avançados',{exact:true}).click();await page.getByRole('button',{name:'3 · Critérios',exact:true}).click();await page.locator('[name=minResponses]').fill('1');await page.locator('[name=minLoadPercent]').fill('0');await expect(page.locator('#submit')).toBeEnabled({timeout:20000});await page.getByRole('button',{name:'1 · Cenário',exact:true}).click();
 }
 test('validation sends no traffic, reports inline errors and supports duplicate collapsed steps',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await configure(page,'Pré-validação');
   const before=received;await page.getByRole('button',{name:'Validar configuração',exact:true}).click();await expect(page.locator('#message')).toContainText('Configuração válida');expect(received).toBe(before);
   await page.locator('[data-field=url]').fill('{{MISSING}}/x');await page.getByRole('button',{name:'Validar configuração',exact:true}).click();await expect(page.locator('.field-error')).toContainText('variável não definida');await expect(page.locator('[data-field=url]')).toBeFocused();
   await page.locator('[data-field=url]').fill(url);await page.getByRole('button',{name:'Duplicar requisição',exact:true}).click();await expect(page.locator('.request-card')).toHaveCount(2);
-  await page.locator('.request-head').first().click();await expect(page.locator('.request-card').first()).not.toHaveAttribute('open','');expect(errors).toEqual([]);
+  await page.locator('.request-card[open] .request-head').click();await expect(page.locator('.request-card').last()).not.toHaveAttribute('open','');expect(errors).toEqual([]);
 });
 test('saved configuration executes, exports XLSX and restores historical charts after reload',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await configure(page);
@@ -34,10 +34,10 @@ test('single execution is functional, repeat preserves it and comparison flags d
   await configure(page,'Verificação navegador');await page.getByRole('button',{name:'Executar uma vez',exact:true}).click();await expect(page.locator('#status')).toHaveText('Fluxo aprovado',{timeout:20000});
   await expect(page.locator('#run-info')).toContainText('Verificação funcional');await expect(page.locator('#repeat')).toBeEnabled({timeout:20000});const repeated=page.waitForResponse(res=>res.url().endsWith('/repeat') && res.request().method()==='POST');await page.locator('#repeat').click();const repeatResponse=await repeated;expect(repeatResponse.status()).toBe(201);const next=await repeatResponse.json();await expect(page.locator('#monitor')).toHaveAttribute('data-run-id',next.id);await expect(page.locator('#status')).toHaveText('Fluxo aprovado',{timeout:20000});
   await page.getByRole('link',{name:'Resultados',exact:true}).first().click();await page.locator('#compare-baseline').selectOption({label:(await page.locator('#compare-baseline option').allTextContents()).find(t=>t.startsWith('Health navegador'))});
-  await page.locator('#compare-runs').click();await expect(page.locator('#comparison-note')).toContainText('Comparação com ressalvas');await expect(page.locator('#comparison-output')).toContainText('p95');
+  await page.locator('#compare-runs').click();await expect(page.locator('#comparison-note')).toContainText('Comparação com ressalvas');await expect(page.locator('#comparison-output')).toContainText('p95');await expect(page.locator('#comparison-xlsx')).toBeVisible();const exported=page.waitForEvent('download');await page.locator('#comparison-xlsx').click();expect((await exported).suggestedFilename()).toMatch(/comparacao.xlsx$/);
 });
 test('cancelled run remains partial and can export its collected evidence',async({page})=>{
-  await configure(page,'Cancelamento navegador');await page.locator('#stages input').nth(0).fill('10');await page.getByRole('button',{name:'Iniciar teste de carga',exact:true}).click();await expect(page.locator('#cancel')).toBeVisible();await page.waitForTimeout(1100);await page.locator('#cancel').click();await expect(page.locator('#status')).toHaveText('Resultado parcial',{timeout:20000});await expect(page.locator('#xlsx')).toBeVisible();
+  await configure(page,'Cancelamento navegador');await page.getByRole('button',{name:'2 · Carga',exact:true}).click();await page.locator('#stages input').nth(0).fill('10');await page.getByRole('button',{name:'Iniciar teste de carga',exact:true}).click();await expect(page.locator('#cancel')).toBeVisible();await page.waitForTimeout(1100);await page.locator('#cancel').click();await expect(page.locator('#status')).toHaveText('Resultado parcial',{timeout:20000});await expect(page.locator('#xlsx')).toBeVisible();
 });
 test('mobile and zoomed layouts keep navigation, fields and evidence accessible',async({page})=>{
   await configure(page,'Layout');await page.evaluate(()=>window.scrollTo(0,700));expect(await page.locator('.sidebar').evaluate(el=>el.getBoundingClientRect().top)).toBe(76);
@@ -47,7 +47,7 @@ test('mobile and zoomed layouts keep navigation, fields and evidence accessible'
   await page.locator('[data-field=url]').focus();await expect(page.locator('[data-field=url]')).toBeFocused();await page.screenshot({path:'test-results/zoom.png',fullPage:true});
 });
 test('arrival ramps persist, show live throughput and distinguish actual starts from planned demand',async({page})=>{
-  await configure(page,'Chegadas e throughput');
+  await configure(page,'Chegadas e throughput');await page.getByRole('button',{name:'2 · Carga',exact:true}).click();
   await page.locator('[name=loadModel]').selectOption('arrival');await page.locator('[name=warmupSec]').fill('1');
   await page.locator('#stages input').nth(0).fill('4');await page.locator('#stages input').nth(1).fill('8');
   await page.locator('[data-stage-profile]').selectOption('ramp');await page.locator('[data-stage-from]').fill('4');
@@ -60,5 +60,17 @@ test('arrival ramps persist, show live throughput and distinguish actual starts 
   await expect(page.locator('#status')).toHaveText('Aprovado',{timeout:20000});
   await page.getByRole('link',{name:'Resultados',exact:true}).first().click();await expect(page.locator('#criteria-table')).toContainText('Estágio 1: p95');
   await page.getByRole('link',{name:/Testes salvos/}).click();await page.getByRole('button',{name:'Carregar Chegadas e throughput',exact:true}).click();
-  await expect(page.locator('[name=loadModel]')).toHaveValue('arrival');await expect(page.locator('[data-stage-profile]')).toHaveValue('ramp');await expect(page.locator('[data-stage-from]')).toHaveValue('4');
+  await page.getByRole('button',{name:'2 · Carga',exact:true}).click();await expect(page.locator('[name=loadModel]')).toHaveValue('arrival');await expect(page.locator('[data-stage-profile]')).toHaveValue('ramp');await expect(page.locator('[data-stage-from]')).toHaveValue('4');
+});
+test('visual editor creates a conditional loop, preserves undo and exports step metrics',async({page})=>{
+  await configure(page,'Fluxo visual');
+  await page.locator('[data-field=extractPath]').fill('ok');await page.locator('[data-field=extractVariable]').fill('FLAG');
+  await page.locator('#flow-kind').selectOption('condition');await page.locator('#flow-add').click();
+  await page.locator('[data-field=variable]').fill('FLAG');await page.locator('[data-field=operator]').selectOption('equals');await page.locator('[data-field=conditionValue]').fill('true');
+  await page.locator('#flow-kind').selectOption('loop');await page.getByRole('button',{name:'Adicionar ao se verdadeiro',exact:true}).click();await page.locator('[data-field=limit]').fill('2');
+  await page.locator('#flow-kind').selectOption('request');await page.getByRole('button',{name:'Adicionar ao passos internos',exact:true}).click();await page.locator('[data-field=url]').fill(url);await page.locator('[data-field=name]').fill('Detalhe');
+  await page.locator('#flow-undo').click();await page.locator('#flow-redo').click();await expect(page.locator('[data-field=name]')).toHaveValue('Detalhe');
+  await page.locator('#flow-graph').click();await expect(page.locator('#flow-canvas')).toBeVisible();await expect(page.locator('.flow-node')).toHaveCount(4);await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'test-results/flow-editor.png',fullPage:true});
+  await page.locator('#save-test').click();await expect(page.locator('#message')).toContainText('Teste salvo');await page.locator('#check-once').click();await expect(page.locator('#status')).toHaveText('Fluxo aprovado',{timeout:20000});
+  await page.getByRole('link',{name:'Resultados',exact:true}).first().click();await page.getByRole('button',{name:'Jornada e passos',exact:true}).click();await expect(page.locator('#flow-results')).toContainText('Detalhe');await expect(page.locator('#flow-results')).toContainText('2 execuções');
 });

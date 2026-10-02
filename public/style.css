@@ -204,3 +204,34 @@ body[data-view=monitor] .overview, body[data-view=results] .overview { display:n
 .mobile-destination { display:none; }
 @media(max-width:830px) { .view-tabs .mobile-destination { display:block; } }
 @container workspace (max-width:830px) { .view-tabs .mobile-destination { display:block; } }
+/* Flow editor: tree order drives both views; canvas positioning is presentation. */
+.flow-toolbar,.flow-add-controls,.creation-steps,.result-tabs { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0; }
+.flow-toolbar label,.flow-add-controls label { flex:1; min-width:140px; margin:0; }
+.flow-toolbar button[aria-pressed=true],.result-tabs button[aria-pressed=true] { border-color:var(--accent); color:var(--accent); }
+.flow-nested { margin-left:22px; border-left:2px solid #657753; padding-left:16px; margin-block:14px; }
+.flow-nested>strong { display:block; margin:10px 0; }
+.flow-rule { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; border:1px solid var(--border); border-radius:8px; padding:14px; margin-block:12px; }
+.flow-rule input[type=checkbox] { width:auto; }.flow-card fieldset { border:1px solid var(--border); border-radius:8px; margin-block:16px; padding:12px; }
+.flow-card .request-label { flex:1; }.flow-card .request-body>label { margin-top:12px; }
+.flow-canvas { max-height:600px; overflow:auto; border:1px solid var(--border); border-radius:12px; background:#121916; padding:25px; }
+.flow-graph-tree { display:flex; flex-direction:column; align-items:center; min-width:450px; zoom:var(--flow-zoom); }
+.flow-node { position:relative; width:260px; min-height:56px; margin:18px; border:2px solid #73836a; background:#263523; text-align:left; white-space:normal; }
+.flow-node::after { content:'↓'; position:absolute; bottom:-31px; left:50%; color:#c0f780; }.flow-node:last-child::after { content:''; }
+.flow-node[data-selected=true] { border-color:var(--accent); box-shadow:0 0 0 3px #c0f78022; }
+.flow-branches { display:flex; gap:20px; }.flow-branch { border:1px dashed #56624e; padding:12px; display:flex; flex-direction:column; align-items:center; border-radius:8px; }
+.graph-inspector .flow-card:not([open]) { display:none; }.graph-inspector .flow-nested { border:0; margin-left:0; }.graph-inspector .flow-nested>strong,.graph-inspector .flow-nested>button { display:none; }
+.creation-steps { position:sticky; top:76px; z-index:3; background:#1c2220; padding:12px 20px; border-bottom:1px solid var(--border); }
+#flow-results,#event-results { margin-top:20px; }.step-outcome { padding:12px; border:1px solid var(--border); border-radius:8px; margin:8px 0; }.step-outcome.failed { border-color:#e78282; }.step-outcome.skipped { opacity:.7; }
+@media(max-width:600px) { .flow-rule { grid-template-columns:minmax(0,1fr); }.flow-nested { margin-left:8px; padding-left:8px; }.creation-steps { position:static; }.flow-view { display:flex; }.flow-toolbar { align-items:flex-end; } }
+.flow-layout[data-view=graph] { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.7fr); gap:18px; align-items:start; }
+.flow-layout[data-view=graph] .graph-inspector { min-width:0; max-height:680px; overflow:auto; }.flow-layout[data-view=graph] .flow-nested { padding:0; }
+body.editing-graph .config-panel { max-width:1250px; }
+@media(max-width:850px) { .flow-layout[data-view=graph] { grid-template-columns:minmax(0,1fr); }.flow-layout[data-view=graph] .graph-inspector { max-height:none; } }
+.result-flow-graph { border-left:2px solid #71855f; padding-left:16px; margin-top:16px; }
+.result-flow-graph .step-outcome .step-outcome { margin-left:18px; }.result-flow-graph .step-outcome>strong,.result-flow-graph .step-outcome>small { display:block; margin-bottom:6px; }
+.step-outcome.failed>strong::before { content:'FALHA · '; color:#f29f9f; }.step-outcome.skipped>strong::before { content:'SEM AMOSTRA · '; }
+#form[data-create-page="0"] .form-section,
+#form[data-create-page="1"] #builder-panel,#form[data-create-page="1"] [data-create-section="2"],
+#form[data-create-page="2"] #builder-panel,#form[data-create-page="2"] [data-create-section="1"],
+#form[data-create-page="3"] #builder-panel,#form[data-create-page="3"] .form-section { display:none; }
+.creation-steps button[aria-current=step] { border-color:var(--accent); color:var(--accent); }
