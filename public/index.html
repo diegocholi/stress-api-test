@@ -64,48 +64,27 @@
       <span class="status-dot"></span><span id="connection-label">Conectando</span><span class="local-tag">LOCAL</span>
     </div>
   </header>
-  <button
-    type="button"
-    id="menu-backdrop"
-    aria-label="Fechar menu"
-    hidden
-    tabindex="-1"
-  ></button>
-  <aside
-    class="sidebar"
-    id="workspace-navigation"
-    aria-label="Navegação principal"
-  >
+  <button type="button" id="menu-backdrop" aria-label="Fechar menu" hidden tabindex="-1"></button>
+  <aside class="sidebar" id="workspace-navigation" aria-label="Navegação principal">
     <button type="button" id="menu-close">Fechar menu ×</button>
     <p class="nav-caption">WORKSPACE</p>
     <nav>
-      <a class="nav-link active" href="#configure"
-        ><svg class="icon">
-          <use href="#i-grid" /></svg
-        ><span>Configurar teste</span><span class="nav-arrow">↗</span></a
-      ><a class="nav-link" href="#monitor"
-        ><svg class="icon">
-          <use href="#i-pulse" /></svg
-        ><span>Acompanhamento</span></a
-      ><a class="nav-link" href="#results-panel"
-        ><svg class="icon">
-          <use href="#i-shield" /></svg
-        ><span>Resultados</span></a
-      ><a class="nav-link" href="#saved-panel"
-        ><svg class="icon">
-          <use href="#i-save" /></svg
-        ><span>Testes salvos</span
-        ><span id="saved-nav-count" class="nav-count">0</span></a
-      ><a class="nav-link" href="#history-panel"
-        ><svg class="icon">
-          <use href="#i-clock" /></svg
-        ><span>Histórico e agenda</span
-        ><span id="nav-count" class="nav-count">0</span></a
-      >
+      <a class="nav-link active" href="#configure"><svg class="icon">
+          <use href="#i-grid" />
+        </svg><span>Configurar teste</span><span class="nav-arrow">↗</span></a><a class="nav-link" href="#monitor"><svg
+          class="icon">
+          <use href="#i-pulse" />
+        </svg><span>Acompanhamento</span></a><a class="nav-link" href="#results-panel"><svg class="icon">
+          <use href="#i-shield" />
+        </svg><span>Resultados</span></a><a class="nav-link" href="#saved-panel"><svg class="icon">
+          <use href="#i-save" />
+        </svg><span>Testes salvos</span><span id="saved-nav-count" class="nav-count">0</span></a><a class="nav-link"
+        href="#history-panel"><svg class="icon">
+          <use href="#i-clock" />
+        </svg><span>Histórico e agenda</span><span id="nav-count" class="nav-count">0</span></a>
     </nav>
     <div class="sidebar-note">
-      <span class="note-symbol">↗</span
-      ><strong>Do cenário à evidência.</strong>
+      <span class="note-symbol">↗</span><strong>Do cenário à evidência.</strong>
       <p>Crie, execute e acompanhe seus testes em um só lugar.</p>
       <span class="note-tag">HTTP / HTTPS</span>
     </div>
@@ -204,9 +183,11 @@
                   cenário <span class="optional">opcional</span>
                 </summary>
                 <label class="sr-only" for="variables">Variáveis do cenário</label><textarea id="variables" rows="3"
-                  placeholder="BASE_URL=http://127.0.0.1:4000"></textarea><small>Uma por linha: NOME=valor. Use {{NOME}}
-                  nas URLs, headers e
-                  no corpo.</small>
+                  aria-describedby="variables-help variables-quotes-help"
+                  placeholder="BASE_URL=http://127.0.0.1:4000"></textarea><small id="variables-help">Uma por linha:
+                  NOME=valor. Use {{NOME}} nas URLs, headers e no corpo.</small>
+                <small id="variables-quotes-help">Não envolva o valor em aspas. Ex.: <code>USER=123.456.789-00</code>.
+                  Aspas digitadas aqui fazem parte do valor enviado.</small>
               </details>
               <p class="help">
                 Monte sua jornada com requisições, condições, repetições e
@@ -366,10 +347,7 @@
           </div>
           <section id="creation-review" class="monitor-content" hidden aria-live="polite"></section>
           <div class="form-submit">
-            <div
-              class="creation-pagination"
-              aria-label="Avançar entre etapas"
-            >
+            <div class="creation-pagination" aria-label="Avançar entre etapas">
               <button type="button" id="creation-prev">Anterior</button>
               <span id="creation-progress" role="status">Etapa 1 de 4</span>
               <button type="button" id="creation-next">Próxima</button>
