@@ -98,30 +98,112 @@ function updateLoadSummary() {
   preview.replaceChildren(svg)
 }
 stages.addEventListener('input', updateLoadSummary)
+const destinations = {
+  '#configure': [
+    'configure',
+    'Configurar teste',
+    'Defina o cenário, a carga e os critérios do seu teste.',
+  ],
+  '#monitor': [
+    'monitor',
+    'Acompanhamento',
+    'Acompanhe a execução e a carga em tempo real.',
+  ],
+  '#results-panel': [
+    'results',
+    'Resultados',
+    'Consulte os critérios, compare execuções e exporte as evidências.',
+  ],
+  '#saved-panel': [
+    'library',
+    'Testes salvos',
+    'Carregue e organize os cenários da sua biblioteca.',
+  ],
+  '#history-panel': [
+    'history',
+    'Histórico e agenda',
+    'Encontre execuções anteriores e acompanhe os agendamentos.',
+  ],
+}
+function closeMenu(restoreFocus = true) {
+  const wasOpen = document.body.classList.contains('menu-open')
+  document.body.classList.remove('menu-open')
+  $('menu-toggle').setAttribute('aria-expanded', 'false')
+  $('menu-backdrop').hidden = true
+  $('workspace-navigation').removeAttribute('role')
+  $('workspace-navigation').removeAttribute('aria-modal')
+  document.querySelector('main').inert = false
+  document.querySelector('.topbar').inert = false
+  $('workspace-navigation').inert =
+    document.body.classList.contains('mobile-layout')
+  if (wasOpen && restoreFocus) $('menu-toggle').focus({ preventScroll: true })
+}
+$('menu-toggle').onclick = () => {
+  document.body.classList.add('menu-open')
+  $('menu-toggle').setAttribute('aria-expanded', 'true')
+  $('menu-backdrop').hidden = false
+  $('workspace-navigation').inert = false
+  $('workspace-navigation').setAttribute('role', 'dialog')
+  $('workspace-navigation').setAttribute('aria-modal', 'true')
+  document.querySelector('main').inert = true
+  document.querySelector('.topbar').inert = true
+  $('menu-close').focus()
+}
+$('menu-close').onclick = () => closeMenu()
+$('menu-backdrop').onclick = () => closeMenu()
+document.addEventListener('keydown', (event) => {
+  if (!document.body.classList.contains('menu-open')) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeMenu()
+  } else if (event.key === 'Tab') {
+    const controls = [
+      ...$('workspace-navigation').querySelectorAll('button, a[href]'),
+    ]
+    const first = controls[0],
+      last = controls.at(-1)
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+})
+new ResizeObserver(([entry]) => {
+  const mobile = entry.contentRect.width <= 830
+  if (mobile !== document.body.classList.contains('mobile-layout')) {
+    document.body.classList.toggle('mobile-layout', mobile)
+    closeMenu(false)
+  }
+}).observe(document.body)
 function updateNavigation() {
-  const hash = location.hash || '#configure'
-  document.body.dataset.view =
-    hash === '#configure'
-      ? 'configure'
-      : hash === '#monitor'
-        ? 'monitor'
-        : hash === '#saved-panel'
-          ? 'library'
-          : hash === '#history-panel'
-            ? 'history'
-            : 'results'
-  document.querySelectorAll('.view-tabs a').forEach((link) => {
-    const active =
-      link.hash ===
-      (document.body.dataset.view === 'results' ? '#results-panel' : hash)
-    if (active) link.setAttribute('aria-current', 'page')
-    else link.removeAttribute('aria-current')
-  })
+  const hash = Object.hasOwn(destinations, location.hash)
+    ? location.hash
+    : '#configure'
+  if (location.hash && location.hash !== hash)
+    history.replaceState(null, '', hash)
+  const [view, title, description] = destinations[hash]
+  document.body.dataset.view = view
+  $('view-title').textContent = title
+  $('view-description').textContent = description
+  document.title = `${title} · Stress Lab`
+  document.querySelector('.breadcrumb strong').textContent = title
   document.querySelectorAll('.nav-link').forEach((link) => {
     const active = link.getAttribute('href') === hash
     link.classList.toggle('active', active)
-    if (active) link.setAttribute('aria-current', 'location')
+    if (active) link.setAttribute('aria-current', 'page')
     else link.removeAttribute('aria-current')
+  })
+}
+for (const link of document.querySelectorAll('.nav-link')) {
+  link.addEventListener('click', () => {
+    closeMenu(false)
+    requestAnimationFrame(() => {
+      $('view-title').focus({ preventScroll: true })
+      $('view-title').scrollIntoView({ block: 'start' })
+    })
   })
 }
 window.addEventListener('hashchange', updateNavigation)
@@ -1903,38 +1985,50 @@ function createPage(index) {
       Number(button.dataset.createStep) === index ? 'step' : 'false'
     )
   $('creation-review').hidden = index !== 3
+  $('creation-progress').textContent = `Etapa ${index + 1} de 4`
+  $('creation-prev').disabled = index === 0
+  $('creation-next').hidden = index === 3
+  $('creation-next').textContent =
+    index === 2 ? 'Revisar configuração' : 'Próxima'
 }
 createPage(0)
-for (const button of document.querySelectorAll('[data-create-step]'))
-  button.onclick = async () => {
-    const index = Number(button.dataset.createStep)
-    if (index === 3) {
-      try {
-        const input = await collectInput()
-        await api('/api/validate', input)
-        const target = $('creation-review')
-        target.replaceChildren()
-        const title = document.createElement('h3')
-        title.textContent = 'Revisão do cenário'
-        let requests = 0
-        flowEditor.walk(input.scenario.steps, (n) => {
-          if (n.type === 'request') requests++
-        })
-        const details = document.createElement('p')
-        details.textContent = `${requests} blocos HTTP · ${input.scenario.setup.length} de preparação global · ${input.scenario.perUser.length} de preparação por usuário · ${input.scenario.teardown.length} de limpeza.`
-        const load = document.createElement('p')
-        load.textContent = `${input.stages.reduce((sum, s) => sum + s.durationSec, 0)} segundos de carga · ${input.loadModel === 'arrival' ? 'Taxa de chegada (jornadas/s)' : 'Usuários concorrentes'} · p95 HTTP ${input.thresholds.p95} ms · falhas máximas ${input.thresholds.errorRate}% · amostra ${input.evidence.minResponses} por estágio.`
-        const note = document.createElement('p')
-        note.textContent =
-          'Configuração validada sem tráfego. Confira a jornada com Executar uma vez antes de aplicar carga.'
-        target.append(title, details, load, note)
-      } catch (error) {
-        showError(error)
-        return
-      }
+async function navigateCreation(index) {
+  if (index === 3) {
+    try {
+      const input = await collectInput()
+      await api('/api/validate', input)
+      const target = $('creation-review')
+      target.replaceChildren()
+      const title = document.createElement('h3')
+      title.textContent = 'Revisão do cenário'
+      let requests = 0
+      flowEditor.walk(input.scenario.steps, (n) => {
+        if (n.type === 'request') requests++
+      })
+      const details = document.createElement('p')
+      details.textContent = `${requests} blocos HTTP · ${input.scenario.setup.length} de preparação global · ${input.scenario.perUser.length} de preparação por usuário · ${input.scenario.teardown.length} de limpeza.`
+      const load = document.createElement('p')
+      load.textContent = `${input.stages.reduce((sum, s) => sum + s.durationSec, 0)} segundos de carga · ${input.loadModel === 'arrival' ? 'Taxa de chegada (jornadas/s)' : 'Usuários concorrentes'} · p95 HTTP ${input.thresholds.p95} ms · falhas máximas ${input.thresholds.errorRate}% · amostra ${input.evidence.minResponses} por estágio.`
+      const note = document.createElement('p')
+      note.textContent =
+        'Configuração validada sem tráfego. Confira a jornada com Executar uma vez antes de aplicar carga.'
+      target.append(title, details, load, note)
+    } catch (error) {
+      showError(error)
+      return
     }
-    createPage(index)
   }
+  createPage(index)
+  const active = document.querySelector(`[data-create-step="${index}"]`)
+  active.focus({ preventScroll: true })
+  active.scrollIntoView({ block: 'nearest' })
+}
+for (const button of document.querySelectorAll('[data-create-step]'))
+  button.onclick = () => navigateCreation(Number(button.dataset.createStep))
+$('creation-prev').onclick = () =>
+  navigateCreation(Number($('form').dataset.createPage) - 1)
+$('creation-next').onclick = () =>
+  navigateCreation(Number($('form').dataset.createPage) + 1)
 let resultTab = 'summary'
 function resultTabs() {
   const flow = resultTab === 'flow',

@@ -784,8 +784,8 @@ h3 {
   padding: 0;
   display: grid;
   place-items: center;
-  width: 25px;
-  height: 25px;
+  width: 44px;
+  height: 44px;
   background: #262d35;
   border-color: #3a434e;
   font-size: 12px;
@@ -926,7 +926,7 @@ h3 {
 .stage-heading,
 .stage {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
   gap: 12px;
 }
 .stage-heading {
@@ -935,16 +935,17 @@ h3 {
   margin-bottom: 8px;
 }
 .stage {
-  align-items: center;
+  align-items: end;
   margin-bottom: 8px;
 }
-.stage input {
+.stage input,
+.stage select {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
 .stage button {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   background: transparent;
   border-color: #3d434b;
@@ -1210,7 +1211,8 @@ h3 {
 .actions a {
   display: flex;
   align-items: center;
-  gap: 17px;
+  gap: 10px;
+  min-height: 44px;
   padding: 8px 11px;
   border: 1px solid #3d4c33;
   background: #263022;
@@ -1319,8 +1321,8 @@ pre {
   color: #8e9bae;
 }
 .empty-history > .icon {
-  width: 25px;
-  height: 25px;
+  width: 44px;
+  height: 44px;
   color: #596d83;
   margin-bottom: 13px;
 }
@@ -1365,9 +1367,6 @@ footer .status-dot {
   }
 }
 @media (max-width: 1250px) {
-  :root {
-    --sidebar: 185px;
-  }
   main {
     padding: 26px 23px 0;
   }
@@ -1426,38 +1425,8 @@ footer .status-dot {
   }
 }
 @media (max-width: 1050px) {
-  :root {
-    --sidebar: 70px;
-  }
-  .sidebar {
-    padding-inline: 9px;
-    align-items: center;
-  }
-  .nav-caption,
-  .nav-link > span,
-  .sidebar-note,
-  .sidebar-footer {
-    display: none;
-  }
-  .sidebar nav {
-    width: 100%;
-  }
-  .nav-link {
-    justify-content: center;
-    padding: 13px 0;
-  }
-  .nav-link .icon {
-    width: 19px;
-    height: 19px;
-  }
-  .breadcrumb {
-    margin-left: 10px;
-  }
   .workspace {
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  }
-  .intro-action {
-    display: none;
   }
 }
 @media (max-width: 830px) {
@@ -1722,20 +1691,12 @@ footer .status-dot {
   .advanced summary {
     font-size: 11px;
   }
-  .request-controls button {
-    width: 29px;
-    height: 29px;
-  }
   .request-head {
     gap: 5px;
   }
-  .stage button {
-    width: 30px;
-    height: 30px;
-  }
   .stage-heading,
   .stage {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 30px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
   }
   .tabs button {
     font-size: 11px;
@@ -1970,24 +1931,6 @@ footer .status-dot {
   font-size: 9px;
 }
 /* Workspace views and readable evidence tables. */
-.view-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 22px;
-  flex-wrap: wrap;
-}
-.view-tabs a {
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--muted);
-}
-.view-tabs a[aria-current='page'] {
-  background: var(--accent-soft);
-  border-color: #648047;
-  color: var(--accent);
-}
 body[data-view='configure'] .monitor-panel,
 body[data-view='configure'] .results-panel {
   display: none;
@@ -2069,7 +2012,7 @@ small,
   font-size: 12px;
 }
 button {
-  min-height: 36px;
+  min-height: 44px;
 }
 .request-head {
   list-style: none;
@@ -2109,8 +2052,8 @@ button {
   flex-shrink: 0;
 }
 .request-controls button {
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 44px;
+  min-height: 44px;
 }
 .request-body {
   border-top: 1px solid var(--border);
@@ -2274,13 +2217,6 @@ select:focus-visible {
   .sidebar {
     display: none;
   }
-  .view-tabs {
-    position: sticky;
-    top: 66px;
-    z-index: 9;
-    background: var(--bg);
-    padding: 10px 0;
-  }
   .metric-charts,
   body[data-view='results'] .results {
     grid-template-columns: minmax(0, 1fr);
@@ -2296,12 +2232,6 @@ select:focus-visible {
   }
   .intro {
     align-items: start;
-  }
-  .view-tabs a {
-    flex: 1;
-    padding: 10px 6px;
-    text-align: center;
-    font-size: 12px;
   }
   .history-toolbar {
     grid-template-columns: minmax(0, 1fr);
@@ -2384,10 +2314,6 @@ body {
   .request-head {
     flex-wrap: wrap;
   }
-  .view-tabs a {
-    padding: 10px 6px;
-    font-size: 12px;
-  }
 }
 
 .load-preview svg {
@@ -2462,7 +2388,7 @@ body[data-view='configure'] main {
 }
 .stage {
   grid-template-columns:
-    minmax(0, 1fr) minmax(0, 1fr) 36px minmax(100px, 1fr)
+    minmax(0, 1fr) minmax(0, 1fr) 44px minmax(100px, 1fr)
     minmax(70px, 1fr);
 }
 .stage input,
@@ -2483,7 +2409,7 @@ body[data-view='configure'] main {
 }
 @media (max-width: 600px) {
   .stage {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
   }
   .stage select {
     grid-column: 1;
@@ -2500,19 +2426,6 @@ body[data-view='configure'] main {
   }
 }
 
-.mobile-destination {
-  display: none;
-}
-@media (max-width: 830px) {
-  .view-tabs .mobile-destination {
-    display: block;
-  }
-}
-@container workspace (max-width:830px) {
-  .view-tabs .mobile-destination {
-    display: block;
-  }
-}
 /* Flow editor: tree order drives both views; canvas positioning is presentation. */
 .flow-toolbar,
 .flow-add-controls,
@@ -2727,4 +2640,136 @@ body[data-view='configure'] main {
 .creation-steps button[aria-current='step'] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Primary navigation: one shared menu in desktop and mobile layouts. */
+#menu-toggle,
+#menu-close {
+  display: none;
+}
+#menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  border: 0;
+  border-radius: 0;
+  background: #0009;
+}
+body.mobile-layout #menu-toggle,
+body.mobile-layout #menu-close {
+  display: block;
+  flex-shrink: 0;
+}
+body.mobile-layout .sidebar {
+  display: none;
+  float: none;
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(300px, 85vw);
+  height: 100%;
+  overflow-y: auto;
+  z-index: 21;
+  padding: 20px 16px;
+}
+body.mobile-layout.menu-open .sidebar {
+  display: flex;
+}
+body.menu-open {
+  overflow: hidden;
+}
+#menu-close {
+  margin-bottom: 24px;
+}
+.nav-link {
+  min-height: 44px;
+}
+#view-title {
+  scroll-margin-top: 96px;
+}
+body.mobile-layout .topbar {
+  gap: 10px;
+}
+body.mobile-layout .brand {
+  min-width: 0;
+}
+body.mobile-layout .connection {
+  min-width: 0;
+  font-size: 10px;
+}
+/* Align actions with controls, below their captions. */
+input:not([type='checkbox']):not([type='range']),
+select {
+  min-height: 44px;
+}
+.flow-toolbar,
+.flow-add-controls {
+  align-items: flex-end;
+}
+.flow-toolbar > button,
+.flow-add-controls > button,
+.flow-view button,
+.comparison-controls > button {
+  min-height: 44px;
+}
+.flow-view {
+  display: flex;
+  gap: 6px;
+}
+.flow-add-controls input[type='range'] {
+  height: 44px;
+  padding-block: 0;
+}
+.creation-steps {
+  margin: 0;
+  gap: 8px;
+  align-items: stretch;
+}
+.creation-steps button {
+  flex: 1;
+  min-width: 110px;
+  background: transparent;
+}
+.creation-steps button[aria-current='step'] {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.creation-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+#creation-progress {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.form-submit .creation-pagination button {
+  width: auto;
+  flex: 0 1 auto;
+}
+body.mobile-layout .creation-steps {
+  position: static;
+}
+@media (max-width: 480px) {
+  .flow-toolbar label,
+  .flow-add-controls label {
+    flex-basis: 100%;
+  }
+  .flow-add-controls > button {
+    flex: 1;
+  }
+  .creation-pagination {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  #creation-progress {
+    font-size: 12px;
+  }
+  .creation-pagination button {
+    padding-inline: 10px;
+  }
 }

@@ -54,6 +54,7 @@
     </defs>
   </svg>
   <header class="topbar">
+    <button type="button" id="menu-toggle" aria-controls="workspace-navigation" aria-expanded="false">Menu</button>
     <a class="brand" href="#"><span class="mark">↗</span><span>stress<span class="brand-light">lab</span><small>API
           PERFORMANCE</small></span></a>
     <div class="breadcrumb">
@@ -63,25 +64,48 @@
       <span class="status-dot"></span><span id="connection-label">Conectando</span><span class="local-tag">LOCAL</span>
     </div>
   </header>
-  <aside class="sidebar" aria-label="Navegação principal">
+  <button
+    type="button"
+    id="menu-backdrop"
+    aria-label="Fechar menu"
+    hidden
+    tabindex="-1"
+  ></button>
+  <aside
+    class="sidebar"
+    id="workspace-navigation"
+    aria-label="Navegação principal"
+  >
+    <button type="button" id="menu-close">Fechar menu ×</button>
     <p class="nav-caption">WORKSPACE</p>
     <nav>
-      <a class="nav-link active" href="#configure"><svg class="icon">
-          <use href="#i-grid" />
-        </svg><span>Configurar teste</span><span class="nav-arrow">↗</span></a><a class="nav-link"
-        href="#saved-panel"><svg class="icon">
-          <use href="#i-save" />
-        </svg><span>Testes salvos</span><span id="saved-nav-count" class="nav-count">0</span></a><a class="nav-link"
-        href="#monitor"><svg class="icon">
-          <use href="#i-pulse" />
-        </svg><span>Acompanhamento</span></a><a class="nav-link" href="#results-panel"><svg class="icon">
-          <use href="#i-shield" />
-        </svg><span>Resultados</span></a><a class="nav-link" href="#history-panel"><svg class="icon">
-          <use href="#i-clock" />
-        </svg><span>Histórico e agenda</span><span id="nav-count" class="nav-count">0</span></a>
+      <a class="nav-link active" href="#configure"
+        ><svg class="icon">
+          <use href="#i-grid" /></svg
+        ><span>Configurar teste</span><span class="nav-arrow">↗</span></a
+      ><a class="nav-link" href="#monitor"
+        ><svg class="icon">
+          <use href="#i-pulse" /></svg
+        ><span>Acompanhamento</span></a
+      ><a class="nav-link" href="#results-panel"
+        ><svg class="icon">
+          <use href="#i-shield" /></svg
+        ><span>Resultados</span></a
+      ><a class="nav-link" href="#saved-panel"
+        ><svg class="icon">
+          <use href="#i-save" /></svg
+        ><span>Testes salvos</span
+        ><span id="saved-nav-count" class="nav-count">0</span></a
+      ><a class="nav-link" href="#history-panel"
+        ><svg class="icon">
+          <use href="#i-clock" /></svg
+        ><span>Histórico e agenda</span
+        ><span id="nav-count" class="nav-count">0</span></a
+      >
     </nav>
     <div class="sidebar-note">
-      <span class="note-symbol">↗</span><strong>Do cenário à evidência.</strong>
+      <span class="note-symbol">↗</span
+      ><strong>Do cenário à evidência.</strong>
       <p>Crie, execute e acompanhe seus testes em um só lugar.</p>
       <span class="note-tag">HTTP / HTTPS</span>
     </div>
@@ -93,8 +117,8 @@
     <div class="intro">
       <div>
         <p class="eyebrow"><span></span> SEU LABORATÓRIO DE PERFORMANCE</p>
-        <h1>Performance, <span>sob controle.</span></h1>
-        <p>Construa cenários. Aumente a carga. Entenda cada resposta.</p>
+        <h1 id="view-title" tabindex="-1">Configurar teste</h1>
+        <p id="view-description">Defina o cenário, a carga e os critérios do seu teste.</p>
       </div>
       <button type="button" class="intro-action" id="new-test">
         Novo teste <svg class="icon">
@@ -131,11 +155,6 @@
         <small>aguardando execução</small>
       </div>
     </section>
-    <nav class="view-tabs" aria-label="Área de trabalho">
-      <a href="#configure">Configuração</a><a href="#monitor">Acompanhamento</a><a
-        href="#results-panel">Resultados</a><a class="mobile-destination" href="#saved-panel">Biblioteca</a><a
-        class="mobile-destination" href="#history-panel">Histórico</a>
-    </nav>
     <div class="workspace">
       <section class="panel config-panel" id="configure">
         <div class="panel-heading">
@@ -347,6 +366,14 @@
           </div>
           <section id="creation-review" class="monitor-content" hidden aria-live="polite"></section>
           <div class="form-submit">
+            <div
+              class="creation-pagination"
+              aria-label="Avançar entre etapas"
+            >
+              <button type="button" id="creation-prev">Anterior</button>
+              <span id="creation-progress" role="status">Etapa 1 de 4</span>
+              <button type="button" id="creation-next">Próxima</button>
+            </div>
             <div class="save-actions">
               <button type="button" id="save-test" class="save-button">
                 <svg class="icon">

@@ -191,7 +191,7 @@ test('mobile and zoomed layouts keep navigation, fields and evidence accessible'
   ).toBe(76)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(
-    page.getByRole('link', { name: 'Configuração', exact: true })
+    page.getByRole('button', { name: 'Menu', exact: true })
   ).toBeVisible()
   expect(
     await page.evaluate(
@@ -207,6 +207,12 @@ test('mobile and zoomed layouts keep navigation, fields and evidence accessible'
       () => document.documentElement.scrollWidth <= window.innerWidth
     )
   ).toBe(true)
+  await expect(page.locator('#menu-toggle')).toBeVisible()
+  await page.locator('#menu-toggle').click()
+  await expect(
+    page.getByRole('link', { name: /Histórico e agenda/ })
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.locator('[data-field=url]').focus()
   await expect(page.locator('[data-field=url]')).toBeFocused()
   await page.screenshot({ path: 'test-results/zoom.png', fullPage: true })
@@ -311,4 +317,137 @@ test('visual editor creates a conditional loop, preserves undo and exports step 
     .click()
   await expect(page.locator('#flow-results')).toContainText('Detalhe')
   await expect(page.locator('#flow-results')).toContainText('2 execuções')
+})
+
+test('primary navigation preserves the editor, handles history and falls back for unknown URLs', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page.locator('.nav-link[aria-current="page"]')).toHaveText(
+    /Configurar teste/
+  )
+  await expect(page.locator('.view-tabs')).toHaveCount(0)
+  await page.locator('[name=name]').fill('Rascunho preservado')
+  await page.getByRole('link', { name: /Testes salvos/ }).click()
+  await expect(page.locator('#view-title')).toHaveText('Testes salvos')
+  await page.goBack()
+  await expect(page.locator('[name=name]')).toHaveValue('Rascunho preservado')
+  await page.goForward()
+  await expect(page.locator('#view-title')).toHaveText('Testes salvos')
+  await page.goto('/#unknown')
+  await expect(page.locator('#view-title')).toHaveText('Configurar teste')
+  await expect(page.locator('.nav-link[aria-current="page"]')).toHaveCount(1)
+})
+
+test('creation controls preserve fields, validate review and align editor actions', async ({
+  page,
+}) => {
+  await configure(page, 'Etapas')
+  await expect(page.locator('#creation-prev')).toBeDisabled()
+  const positions = await page.locator('.flow-add-controls').evaluate((el) => {
+    const select = el.querySelector('select').getBoundingClientRect()
+    const button = el.querySelector('#flow-add').getBoundingClientRect()
+    return {
+      selectBottom: select.bottom,
+      buttonBottom: button.bottom,
+      selectHeight: select.height,
+      buttonHeight: button.height,
+    }
+  })
+  expect(
+    Math.abs(positions.selectBottom - positions.buttonBottom)
+  ).toBeLessThanOrEqual(1)
+  expect(positions.selectHeight).toBe(44)
+  expect(positions.buttonHeight).toBe(44)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.screenshot({
+    path: 'test-results/desktop-configure.png',
+    fullPage: true,
+  })
+  await page.locator('#creation-next').click()
+  await expect(page.locator('#creation-progress')).toHaveText('Etapa 2 de 4')
+  const stageBottoms = await page
+    .locator('.stage')
+    .first()
+    .evaluate((el) =>
+      [...el.children]
+        .filter((control) => !control.hidden)
+        .map((control) => control.getBoundingClientRect().bottom)
+    )
+  expect(
+    Math.max(...stageBottoms) - Math.min(...stageBottoms)
+  ).toBeLessThanOrEqual(1)
+  await page.locator('#creation-next').click()
+  await expect(page.locator('#creation-progress')).toHaveText('Etapa 3 de 4')
+  const before = received
+  await page.locator('#creation-next').click()
+  await expect(page.locator('#creation-review')).toContainText(
+    'Configuração validada sem tráfego'
+  )
+  expect(received).toBe(before)
+  await expect(page.locator('#creation-next')).toBeHidden()
+  await page.locator('#creation-prev').click()
+  await page.getByRole('button', { name: '1 · Cenário', exact: true }).click()
+  await expect(page.locator('[data-field=url]')).toHaveValue(url)
+  await page.locator('[data-field=url]').fill('{{MISSING}}/x')
+  await page.getByRole('button', { name: '4 · Revisão', exact: true }).click()
+  await expect(page.locator('.field-error')).toContainText(
+    'variável não definida'
+  )
+  await expect(page.locator('[data-field=url]')).toBeFocused()
+})
+
+test('mobile menu supports keyboard dismissal, selection and all destinations without overflow', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  const toggle = page.getByRole('button', { name: 'Menu', exact: true })
+  await toggle.click()
+  await expect(
+    page.getByRole('dialog', { name: 'Navegação principal' })
+  ).toBeVisible()
+  await expect(page.locator('#menu-close')).toBeFocused()
+  await page.screenshot({ path: 'test-results/mobile-menu.png' })
+  await page.keyboard.press('Shift+Tab')
+  await expect(
+    page.getByRole('link', { name: /Histórico e agenda/ })
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.locator('#menu-close')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(toggle).toBeFocused()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  for (const name of [
+    'Acompanhamento',
+    'Resultados',
+    'Testes salvos',
+    'Histórico e agenda',
+    'Configurar teste',
+  ]) {
+    await toggle.click()
+    await page.getByRole('link', { name: new RegExp(name) }).click()
+    await expect(page.locator('#view-title')).toHaveText(name)
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth
+      )
+    ).toBe(true)
+  }
+  await toggle.click()
+  await page.locator('#menu-backdrop').click({ position: { x: 370, y: 100 } })
+  await expect(toggle).toBeFocused()
+  await page.setViewportSize({ width: 900, height: 900 })
+  await expect(
+    page.getByRole('link', { name: /Histórico e agenda/ })
+  ).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth
+    )
+  ).toBe(true)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.locator('.sidebar')).toBeVisible()
+  await expect(toggle).toBeHidden()
 })
